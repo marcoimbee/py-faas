@@ -1,0 +1,10 @@
+[network]
+worker_ip_addr = "127.0.0.1"
+worker_port = 65432
+
+[misc]
+greeting_msg = "Hello brother"
+log_level = "debug"
+
+[statistics]
+enabled = true

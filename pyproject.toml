@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyfaas"
+version = "0.1.0"
+description = "A (very very) lightweight Python FaaS framework"
+readme = "README.md"
+authors = [
+    { name = "Marco Imbelli Cai", email = "marcoimbelli@yahoo.it" }
+]
+license = { text = "MIT" }
+dependencies = [
+    "logging",
+    "tomli",
+    "dill"
+]               
+requires-python = ">=3.8"
+
+[tool.setuptools.packages.find]
+where = ["src"]
