@@ -8,6 +8,11 @@ import base64
 import inspect
 import datetime
 
+logging.basicConfig(
+    format='[WORKER, %(levelname)s]    %(message)s',
+    level=logging.ERROR,   # default until config is loaded
+    force=True
+)
 
 TOML_CONFIG_FILE = "worker/worker_config.toml"
 MAX_DATA = 65536
@@ -260,8 +265,12 @@ def encode_func_result(func_result):
 
 
 
-def main():    
-    config = util.read_config_toml(TOML_CONFIG_FILE)
+def main():
+    try:
+        config = util.read_config_toml(TOML_CONFIG_FILE)
+    except Exception as e:
+        logging.error(e)
+        exit(0)
 
     util.setup_logging(config['misc']['log_level'])
 

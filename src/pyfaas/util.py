@@ -1,10 +1,25 @@
 import logging
 import tomli
+import socket
 
 
-def read_config_toml(path) -> dict:
+# TODO: define custom exception classes
+def read_config_toml(path: str) -> dict:
     with open(path, mode="rb") as fp:
-        return tomli.load(fp)
+        config = tomli.load(fp)
+    
+    # Checking port validity
+    if config['network']['worker_port'] == None or config['network']['worker_port'] <= 1024 or config['network']['worker_port'] >= 65535:
+        raise Exception(f"Config error: invalid port {config['network']['worker_port']}")
+    
+    # Checking IP addr validity
+    try:
+        socket.inet_aton(config['network']['worker_ip_addr'])
+    except socket.error:
+        raise Exception(f"Config error: invalid IP Address {config['network']['worker_ip_addr']}")
+
+    return config
+
 
 def setup_logging(log_level):
     match log_level:

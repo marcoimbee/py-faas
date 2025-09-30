@@ -30,7 +30,11 @@ def pyfaas_config(file_path=None):
     else:
         CONFIG_FILE_PATH = file_path
 
-    PYFAAS_CONFIG = read_config_toml(CONFIG_FILE_PATH)
+    try:
+        PYFAAS_CONFIG = read_config_toml(CONFIG_FILE_PATH)
+    except Exception as e:
+        raise Exception(e)
+
     setup_logging(PYFAAS_CONFIG['misc']['log_level'])
 
     PYFAAS_CONFIGURED = True
