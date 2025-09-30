@@ -101,6 +101,8 @@ class PyfaasWorker:
                                 if func_name in self.functions:
                                     logging.info(f"Unregistering '{func_name}'...")
                                     del self.functions[func_name]
+                                    if self.config['statistics']['enabled']:
+                                        del self.stats[func_name]
                                     client_json_response = build_JSON_response(
                                         status="ok", 
                                         action="unregistered", 
