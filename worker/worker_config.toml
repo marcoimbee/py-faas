@@ -4,7 +4,7 @@ worker_port = 65432
 
 [misc]
 greeting_msg = "Hello brother"
-log_level = "debug"
+log_level = "info"
 
 [statistics]
 enabled = true

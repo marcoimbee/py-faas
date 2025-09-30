@@ -151,8 +151,39 @@ def pyfaas_kill_worker():
         s.sendall(json.dumps(json_payload).encode())
     logging.info("Worker killed by client")
 
+def pyfaas_list():
+    if not PYFAAS_CONFIGURED:
+        logging.warning("PyFaaS was not previously configured by calling pyfaas_config()")
+        pyfaas_config()
 
+    cmd = "list"
 
+    worker_ip_port_tuple = (PYFAAS_CONFIG['network']['worker_ip_addr'], PYFAAS_CONFIG['network']['worker_port'])
+
+    json_payload = {                 # To be sent to server
+        "cmd": cmd
+    }
+
+    json_payload_bytes = json.dumps(json_payload).encode()
+
+    # Send to worker through socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.connect(worker_ip_port_tuple)
+        s.sendall(json_payload_bytes)
+
+        worker_resp_bytes = s.recv(MAX_DATA)
+        worker_resp_json = json.loads(worker_resp_bytes.decode())
+
+    status = worker_resp_json.get("status")
+    func_list = worker_resp_json.get("result")
+    message = worker_resp_json.get("message")
+
+    if status == "ok":
+        logging.info(f"Retrieved {len(func_list)} functions")
+        return func_list
+    else:
+        logging.warning(f"Error while listing functions on the worker: {message}")
+        return -1
 
 def pyfaas_exec(func_name: str, func_arglist: list[object], func_kwargslist: list[object], dependencies):
     if not PYFAAS_CONFIGURED:

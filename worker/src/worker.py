@@ -178,6 +178,32 @@ class PyfaasWorker:
                                         )
                                         conn.sendall(client_json_response)
 
+                            case "list":
+                                try:
+                                    func_list = [f for f, _ in self.functions.items()]
+                                    logging.info(f"List: retrieved {len(func_list)} functions")
+
+                                    client_json_response = build_JSON_response(
+                                        status="ok", 
+                                        action=None, 
+                                        result_type="json", 
+                                        result=func_list,
+                                        message=None
+                                    )
+
+                                    # send back result
+                                    conn.sendall(client_json_response)
+                                    
+                                except Exception as e:
+                                    client_json_response = build_JSON_response(
+                                        status="err", 
+                                        action=None, 
+                                        result_type="json", 
+                                        result=None,
+                                        message=f"{type(e).__name__}: {e}"
+                                    )
+                                    conn.sendall(client_json_response)
+
                             case "get_stats":
                                 logging.info("get_stats() still not implemented")
 
