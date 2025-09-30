@@ -21,7 +21,7 @@ def read_config_toml(path: str) -> dict:
     return config
 
 
-def setup_logging(log_level):
+def setup_logging(log_level: str) -> None:
     match log_level:
         case "info":
             log_level = logging.INFO

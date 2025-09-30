@@ -4,6 +4,7 @@ import dill
 import json
 import base64
 import time
+from typing import Callable
 
 from .util import *
 
@@ -22,7 +23,7 @@ logging.basicConfig(
     force=True
 )
 
-def pyfaas_config(file_path=None):
+def pyfaas_config(file_path: str = None) -> None:
     global CONFIG_FILE_PATH, PYFAAS_CONFIG, PYFAAS_CONFIGURED
     if not file_path:
         logging.warning(f"Unspecified PyFaaS configuration file path, defaulting to {DEFAULT_CONFIG_FILE_PATH}")
@@ -44,7 +45,7 @@ def pyfaas_config(file_path=None):
 # Function name is not necessary, as it can be extracted from the code via function.__name__
 # override: if True, if the worker already has registered a function with the same name, 
 #           will override the previous one and register this new one instead with this name
-def pyfaas_register(func_code, override=True):
+def pyfaas_register(func_code: Callable, override: bool = True) -> int:
     if not PYFAAS_CONFIGURED:
         logging.warning("PyFaaS was not previously configured by calling pyfaas_config()")
         pyfaas_config()
@@ -94,7 +95,7 @@ def pyfaas_register(func_code, override=True):
         return -1
 
 
-def pyfaas_unregister(func_name):
+def pyfaas_unregister(func_name: str) -> int:
     if not PYFAAS_CONFIGURED:
         logging.warning("PyFaaS was not previously configured by calling pyfaas_config()")
         pyfaas_config()
@@ -137,7 +138,7 @@ def pyfaas_get_stats():
     cmd = "get_stats"
     pass
 
-def pyfaas_kill_worker():
+def pyfaas_kill_worker() -> None:
     if not PYFAAS_CONFIGURED:
         logging.warning("PyFaaS was not previously configured by calling pyfaas_config()")
         pyfaas_config()
@@ -155,7 +156,7 @@ def pyfaas_kill_worker():
         s.sendall(json.dumps(json_payload).encode())
     logging.info("Worker killed by client")
 
-def pyfaas_list():
+def pyfaas_list() -> int | list[str]:
     if not PYFAAS_CONFIGURED:
         logging.warning("PyFaaS was not previously configured by calling pyfaas_config()")
         pyfaas_config()
@@ -189,14 +190,14 @@ def pyfaas_list():
         logging.warning(f"Error while listing functions on the worker: {message}")
         return -1
 
-def pyfaas_exec(func_name: str, func_arglist: list[object], func_kwargslist: list[object], dependencies):
+def pyfaas_exec(func_name: str, func_arglist: list[object], func_kwargslist: list[object]) -> object:
     if not PYFAAS_CONFIGURED:
         logging.warning("PyFaaS was not previously configured by calling pyfaas_config()")
         pyfaas_config()
 
     cmd = "exec"
     
-    logging.debug(f"Called faas_exec. Args: {func_name, func_arglist, func_kwargslist, dependencies}")
+    logging.debug(f"Called faas_exec. Args: {func_name, func_arglist, func_kwargslist}")
 
     worker_ip_port_tuple = (PYFAAS_CONFIG['network']['worker_ip_addr'], PYFAAS_CONFIG['network']['worker_port'])
 
@@ -236,7 +237,7 @@ def pyfaas_exec(func_name: str, func_arglist: list[object], func_kwargslist: lis
         return -1
 
 
-def pyfaas_ping():    
+def pyfaas_ping() -> None:
     if not PYFAAS_CONFIGURED:
         logging.warning("PyFaaS was not previously configured by calling pyfaas_config()")
         pyfaas_config()

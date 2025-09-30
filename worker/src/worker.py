@@ -27,7 +27,7 @@ class PyfaasWorker:
 
         logging.info(config['misc']['greeting_msg'])
 
-    def run(self):
+    def run(self) -> None:
         worker_ip_port_tuple = (self.host, self.port)
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.bind(worker_ip_port_tuple)
@@ -229,7 +229,7 @@ class PyfaasWorker:
             except KeyboardInterrupt:
                 logging.info("Goodbye")
 
-    def record_stats(self, func_name, exec_time) -> None:
+    def record_stats(self, func_name: str, exec_time: float) -> None:
         if self.config['statistics']['enabled']:
             if func_name not in self.stats:
                 self.stats[func_name] = {}
@@ -245,7 +245,7 @@ class PyfaasWorker:
             logging.info("Statistics have not been enabled")    
             
 
-def build_JSON_response(status, action, result_type, result, message):
+def build_JSON_response(status: str, action: str, result_type: str, result: object, message: str) -> bytes:
     return json.dumps({
         "status": status,
         "action": action,
@@ -254,7 +254,7 @@ def build_JSON_response(status, action, result_type, result, message):
         "message": message
     }).encode()
 
-def encode_func_result(func_result):
+def encode_func_result(func_result: object) -> tuple[str, str]:
     try:
         json.dumps(func_result)      # Test JSON-serializability, return plain result if successful
         return func_result, "json"
