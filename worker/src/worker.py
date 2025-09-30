@@ -17,10 +17,10 @@ class PyfaasWorker:
         self.host = config['network']['worker_ip_addr']
         self.port = config['network']['worker_port']
         self.config = config
+        self.functions = {}
         self.stats = {}
 
         logging.info(config['misc']['greeting_msg'])
-
 
     def run(self):
         worker_ip_port_tuple = (self.host, self.port)
@@ -47,29 +47,136 @@ class PyfaasWorker:
                         cmd = json_payload["cmd"]
 
                         match cmd:
-                            case "exec":
+                            case "register":
                                 serialized_func_base64 = json_payload["serialized_func_base64"]
                                 serialized_func_bytes = base64.b64decode(serialized_func_base64)
-
-                                func_args = json_payload["args"]
-                                func_kwargs = json_payload["kwargs"]
-
                                 client_function = dill.loads(serialized_func_bytes)
+                                func_name = client_function.__name__
 
-                                logging.info(f"Executing the following call: {client_function.__name__}({func_args}, {func_kwargs})...")
-                                start_time = time.time()
-                                res = client_function(*func_args, **func_kwargs)
-                                end_time = time.time()
+                                client_json_response = None
+                                if func_name not in self.functions:
+                                    self.functions[func_name] = client_function
+                                    logging.info(f"Function {func_name} successfully registered")
+                                    client_json_response = build_JSON_response(
+                                        status="ok", 
+                                        action="registered", 
+                                        result_type=None, 
+                                        result=None,
+                                        message=None
+                                    )
+                                else:
+                                    override = json_payload["override"]
+                                    if override:
+                                        logging.warning(f"A function named '{func_name}' is already registered")
+                                        logging.warning("Overriding...")
+                                        self.functions[func_name] = client_function
+                                        client_json_response = build_JSON_response(
+                                            status="ok", 
+                                            action="overridden", 
+                                            result_type=None, 
+                                            result=None, 
+                                            message=None
+                                        )
+                                    else:
+                                        logging.warning(f"A function named '{func_name}' is already registered")
+                                        logging.warning(f"Function '{func_name}' will not be overridden")
+                                        client_json_response = build_JSON_response(
+                                            status="ok", 
+                                            action="no_action", 
+                                            result_type=None, 
+                                            result=None, 
+                                            message=None
+                                        )
                                 
-                                exec_time = end_time - start_time
-                                self.record_stats(client_function.__name__, exec_time)
-                                
-                                logging.info(f"Executed {client_function.__name__} for {client_addr[0]}:{client_addr[1]} in {exec_time} s")
-                                logging.debug(f"{client_function.__name__} data: \n \t{self.stats[client_function.__name__]}")
+                                logging.debug("Currently registered functions:")
+                                logging.debug(f"\t {self.functions}")
 
-                                # send back result
-                                res_bytes = dill.dumps(res)
-                                conn.sendall(res_bytes)
+                                # JSON payload to client
+                                conn.sendall(client_json_response)
+
+                            case "unregister":
+                                func_name = json_payload["func_name"]
+
+                                client_json_response = None
+                                if func_name in self.functions:
+                                    logging.info(f"Unregistering '{func_name}'...")
+                                    del self.functions[func_name]
+                                    client_json_response = build_JSON_response(
+                                        status="ok", 
+                                        action="unregistered", 
+                                        result_type=None, 
+                                        result=None, 
+                                        message=None
+                                    )
+                                else:
+                                    logging.info(f"No function named '{func_name}' is registered right now")
+                                    client_json_response = build_JSON_response(
+                                        status="err", 
+                                        action="no_func", 
+                                        result_type=None, 
+                                        result=None, 
+                                        message=f"No function named '{func_name}' is registered at the worker right now"
+                                    )
+
+                                logging.debug("Currently registered functions:")
+                                logging.debug(f"\t {self.functions}")
+
+                                # JSON payload to client
+                                conn.sendall(client_json_response)
+
+                            case "exec":
+                                func_name = json_payload["func_name"]
+                                func_args = json_payload.get("args", [])
+                                func_kwargs = json_payload.get("kwargs", {})
+
+                                if func_name not in self.functions:
+                                    logging.info(f"No function named '{func_name}' is registered right now")
+                                    client_json_response = build_JSON_response(
+                                        status="err", 
+                                        action="no_func", 
+                                        result_type=None, 
+                                        result=None, 
+                                        message=f"No function named '{func_name}' is registered at the worker right now"
+                                    )
+                                    conn.sendall(client_json_response)
+                                else:
+                                    try:
+                                        logging.info(f"Executing the following call: {func_name}({func_args}, {func_kwargs})")
+
+                                        client_function = self.functions[func_name]
+
+                                        start_time = time.time()
+                                        func_res = client_function(*func_args, **func_kwargs)
+                                        end_time = time.time()
+
+                                        exec_time = end_time - start_time
+                                        self.record_stats(func_name, exec_time)
+
+                                        logging.info(f"Executed '{func_name}' for {client_addr[0]}:{client_addr[1]} in {exec_time} s")
+                                        logging.debug(f"{func_name} data: \n \t{self.stats[func_name]}")
+                                        logging.debug(f"Function result: {func_res}")
+
+                                        encoded_func_res, func_res_type = encode_func_result(func_res)          # JSON or base64
+                                        client_json_response = build_JSON_response(
+                                            status="ok", 
+                                            action="executed", 
+                                            result_type=func_res_type, 
+                                            result=encoded_func_res,
+                                            message=None
+                                        )
+
+                                        # send back result
+                                        conn.sendall(client_json_response)
+                                        
+                                    except Exception as e:
+                                        client_json_response = build_JSON_response(
+                                            status="err", 
+                                            action=None, 
+                                            result_type="json", 
+                                            result=None,
+                                            message=f"{type(e).__name__}: {e}"
+                                        )
+                                        conn.sendall(client_json_response)
 
                             case "get_stats":
                                 logging.info("get_stats() still not implemented")
@@ -104,6 +211,25 @@ class PyfaasWorker:
         else:
             logging.info("Statistics have not been enabled")    
             
+
+def build_JSON_response(status, action, result_type, result, message):
+    return json.dumps({
+        "status": status,
+        "action": action,
+        "result_type": result_type,
+        "result": result,
+        "message": message
+    }).encode()
+
+def encode_func_result(func_result):
+    try:
+        json.dumps(func_result)      # Test JSON-serializability, return plain result if successful
+        return func_result, "json"
+    except (TypeError, OverflowError):      # result is not JSON-serializable, let caller know
+        func_result_bytes = dill.dumps(func_result)
+        func_result_base64 = base64.b64encode(func_result_bytes).decode()
+        return func_result_base64, "pickle_base64"
+
 
 
 def main():    

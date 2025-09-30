@@ -8,7 +8,7 @@ import time
 from .util import *
 
 
-MAX_DATA = 65536
+MAX_DATA = 4096
 
 # --- PyFaaS configuration
 PYFAAS_CONFIGURED = False
@@ -37,6 +37,94 @@ def pyfaas_config(file_path=None):
     logging.info(f"PyFaaS has been configured using {CONFIG_FILE_PATH}")
 
 
+# Function name is not necessary, as it can be extracted from the code via function.__name__
+# override: if True, if the worker already has registered a function with the same name, 
+#           will override the previous one and register this new one instead with this name
+def pyfaas_register(func_code, override=True):
+    if not PYFAAS_CONFIGURED:
+        logging.warning("PyFaaS was not previously configured by calling pyfaas_config()")
+        pyfaas_config()
+    
+    cmd = "register"
+
+    worker_ip_port_tuple = (PYFAAS_CONFIG['network']['worker_ip_addr'], PYFAAS_CONFIG['network']['worker_port'])
+
+    # Serializing func
+    encoding_start = time.time()
+    serialized_func = dill.dumps(func_code)
+    serialized_func_base64 = base64.b64encode(serialized_func).decode("utf-8")
+    logging.debug(f"Base64-encoded function: {serialized_func_base64}")
+    encoding_end = time.time()
+    logging.debug(f"Function encoding took {encoding_end - encoding_start} s")
+
+    json_payload = {                 # To be sent to server
+        "cmd": cmd,
+        "serialized_func_base64": serialized_func_base64,
+        "override": override
+    }
+
+    json_payload_bytes = json.dumps(json_payload).encode()
+
+    # Send to worker through socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.connect(worker_ip_port_tuple)
+        s.sendall(json_payload_bytes)
+
+        worker_resp_bytes = s.recv(MAX_DATA)
+        worker_resp_json = json.loads(worker_resp_bytes.decode())
+
+    func_name = func_code.__name__
+    status = worker_resp_json.get("status")
+    action = worker_resp_json.get("action")
+    message = worker_resp_json.get("message")
+    if status == "ok":
+        if action == "registered":
+            logging.info(f"Successfully registered '{func_name}'")
+        elif action == "overridden":
+            logging.info(f"Successfully overridden '{func_name}'")
+        elif action == "no_action":
+            logging.info(f"No action was performed")
+        return 1
+    else:
+        logging.warning(f"Error while registering a function: {message}")
+        return -1
+
+
+def pyfaas_unregister(func_name):
+    if not PYFAAS_CONFIGURED:
+        logging.warning("PyFaaS was not previously configured by calling pyfaas_config()")
+        pyfaas_config()
+
+    cmd = "unregister"
+
+    worker_ip_port_tuple = (PYFAAS_CONFIG['network']['worker_ip_addr'], PYFAAS_CONFIG['network']['worker_port'])
+
+    json_payload = {                 # To be sent to server
+        "cmd": cmd,
+        "func_name": func_name
+    }
+
+    json_payload_bytes = json.dumps(json_payload).encode()
+
+    # Send to worker through socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.connect(worker_ip_port_tuple)
+        s.sendall(json_payload_bytes)
+
+        worker_resp_bytes = s.recv(MAX_DATA)
+        worker_resp_json = json.loads(worker_resp_bytes.decode())
+
+    status = worker_resp_json.get("status")
+    action = worker_resp_json.get("action")
+    message = worker_resp_json.get("message")
+    if status == "ok":
+        if action == "unregistered":
+            logging.info(f"Successfully unregistered {func_name}()")
+            return 1
+    elif status == "err":
+        logging.warning(f"Error while unregistering a function: {message}")
+        return -1
+
 def pyfaas_get_stats():
     if not PYFAAS_CONFIGURED:
         logging.warning("PyFaaS was not previously configured by calling pyfaas_config()")
@@ -64,45 +152,53 @@ def pyfaas_kill_worker():
     logging.info("Worker killed by client")
 
 
-def pyfaas_exec(func_code, func_arglist, func_kwargslist, dependencies):
+
+
+def pyfaas_exec(func_name: str, func_arglist: list[object], func_kwargslist: list[object], dependencies):
     if not PYFAAS_CONFIGURED:
         logging.warning("PyFaaS was not previously configured by calling pyfaas_config()")
         pyfaas_config()
 
     cmd = "exec"
     
-    logging.debug(f"Called faas_exec. Args: {func_code, func_arglist, func_kwargslist, dependencies}")
+    logging.debug(f"Called faas_exec. Args: {func_name, func_arglist, func_kwargslist, dependencies}")
 
     worker_ip_port_tuple = (PYFAAS_CONFIG['network']['worker_ip_addr'], PYFAAS_CONFIG['network']['worker_port'])
 
-    # Serialize simple func
-    encoding_start = time.time()
-    serialized_func = dill.dumps(func_code)
-    serialized_func_base64 = base64.b64encode(serialized_func).decode("utf-8")
-    logging.debug(f"Base64-encoded function: {serialized_func_base64}")
-    encoding_end = time.time()
-    logging.debug(f"Function encoding took {encoding_end - encoding_start} s")
-
     json_payload = {                 # To be sent to server
         "cmd": cmd,
-        "serialized_func_base64": serialized_func_base64,
+        "func_name": func_name,
         "args": func_arglist,
-        "kwargs": func_kwargslist
+        "kwargs": func_kwargslist,
+        "additional_data": None
     }
 
+    json_payload_bytes = json.dumps(json_payload).encode()
+
     # Send to worker through socket
-    res = None
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.connect(worker_ip_port_tuple)
-        s.sendall(json.dumps(json_payload).encode())
+        s.sendall(json_payload_bytes)
 
-        res_bytes = s.recv(MAX_DATA)
-        res = dill.loads(res_bytes)
+        worker_resp_bytes = s.recv(MAX_DATA)
+        worker_resp_json = json.loads(worker_resp_bytes.decode())
 
-    return res
+    status = worker_resp_json.get("status")
+    action = worker_resp_json.get("action")
+    result_type = worker_resp_json.get("result_type")
+    result = worker_resp_json.get("result")
+    message = worker_resp_json.get("message")
 
-
-
+    if status == "ok":
+        if action == "executed":
+            logging.info(f"Executed '{func_name}'")
+            if result_type == "pickle_base64":
+                result_bytes = base64.b64decode(result)
+                result = dill.loads(result_bytes)
+            return result      # it's the JSON result that was included in the worker msg, or the deserialized Base64 result
+    else:
+        logging.warning(f"Error while executing '{func_name}' on the worker: {message}")
+        return -1
 
 
 def pyfaas_ping():    

@@ -4,24 +4,33 @@ from pyfaas import (
     pyfaas_exec, 
     pyfaas_ping, 
     pyfaas_kill_worker, 
-    pyfaas_config
+    pyfaas_config,
+    pyfaas_register,
+    pyfaas_unregister
 )
 
 
 def simple_fun(a: int, b: int, c: int = 18) -> int:
     time.sleep(1)
-    return a + b * c
+    return a + b + c
 
 
 if __name__ == "__main__":
     pyfaas_config("test/client_config.toml")
 
+    # pyfaas_register(simple_fun, True)
+
+    # pyfaas_unregister("simple_fun")
+
+    
+    pyfaas_register(simple_fun, True)
+
     args = (12, 69)
     kwargs = {"c": 21}
-    res = pyfaas_exec(simple_fun, args, kwargs, None)
+    res = pyfaas_exec("simple_fun", args, kwargs, None)
     print(res)
 
-    pyfaas_ping()
+    # pyfaas_ping()
 
-    pyfaas_kill_worker()
+    # pyfaas_kill_worker()
 
