@@ -18,6 +18,8 @@ def setup_logging(log_level):
             log_level = logging.CRITICAL
         case "fatal":
             log_level = logging.FATAL
+        case "error":
+            log_level = logging.ERROR
         case "":
             log_level = None
         case _:
