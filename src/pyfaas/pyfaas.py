@@ -130,13 +130,44 @@ def pyfaas_unregister(func_name: str) -> int:
         logging.warning(f"Error while unregistering a function: {message}")
         return -1
 
-def pyfaas_get_stats():
+def pyfaas_get_stats(func_name: str = None) -> int | dict:
     if not PYFAAS_CONFIGURED:
         logging.warning("PyFaaS was not previously configured by calling pyfaas_config()")
         pyfaas_config()
     
     cmd = "get_stats"
-    pass
+
+    json_payload = {
+        "cmd": cmd,
+        "func_name": func_name
+    }
+
+    worker_ip_port_tuple = (PYFAAS_CONFIG['network']['worker_ip_addr'], PYFAAS_CONFIG['network']['worker_port'])
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.connect(worker_ip_port_tuple)
+        s.sendall(json.dumps(json_payload).encode())
+
+        worker_resp_bytes = s.recv(MAX_DATA)
+        worker_resp_json = json.loads(worker_resp_bytes.decode())
+
+    status = worker_resp_json.get("status")
+    json_stats = worker_resp_json.get("result")
+    message = worker_resp_json.get("message")
+
+    if status == "ok":
+        if func_name != None:
+            logging.info(f"Retrieved stats for '{func_name}'")
+        else:
+            logging.info(f"Retrieved general stats")
+        logging.debug(f"Stats: {json_stats}")
+        return json_stats
+    else:
+        if func_name != None:
+            logging.error(f"Error while retrieving stats for '{func_name}': {message}")
+        else:
+            logging.error(f"Error while retrieving general stats: {message}")
+        return -1
+
 
 def pyfaas_kill_worker() -> None:
     if not PYFAAS_CONFIGURED:

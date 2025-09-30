@@ -6,6 +6,7 @@ from .pyfaas import pyfaas_config
 from .pyfaas import pyfaas_register
 from .pyfaas import pyfaas_unregister
 from .pyfaas import pyfaas_list
+from .pyfaas import pyfaas_get_stats
 
 __all__ = [             # Exposing what people can import
     "pyfaas_exec",
@@ -15,5 +16,6 @@ __all__ = [             # Exposing what people can import
     "pyfaas_kill_worker",
     "pyfaas_register",
     "pyfaas_unregister",
-    "pyfaas_list"
+    "pyfaas_list",
+    "pyfaas_get_stats"
 ]

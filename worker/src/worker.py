@@ -211,7 +211,37 @@ class PyfaasWorker:
                                     conn.sendall(client_json_response)
 
                             case "get_stats":
-                                logging.info("get_stats() still not implemented")
+                                try:
+                                    func_name = json_payload["func_name"]
+
+                                    if func_name != None:
+                                        if func_name not in self.stats:
+                                            raise Exception(f"No function named '{func_name}' is registered right now")
+                                        else:
+                                            stats_for_client = self.stats[func_name]   # Send only stats for the specified function
+                                    else:
+                                        stats_for_client = self.stats   # No func name was specified, send all stats
+
+                                    client_json_response = build_JSON_response(
+                                        status="ok",
+                                        action=None, 
+                                        result_type="json", 
+                                        result=stats_for_client,
+                                        message=None
+                                    )
+
+                                    # send back result
+                                    conn.sendall(client_json_response)
+                                    
+                                except Exception as e:
+                                    client_json_response = build_JSON_response(
+                                        status="err", 
+                                        action=None, 
+                                        result_type="json", 
+                                        result=None,
+                                        message=f"{e}"
+                                    )
+                                    conn.sendall(client_json_response)
 
                             case "kill":
                                 logging.info(f"Worker killed by client at {datetime.datetime.now()}")
