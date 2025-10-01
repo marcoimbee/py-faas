@@ -13,7 +13,7 @@ logging.basicConfig(
     force=True
 )
 
-TOML_CONFIG_FILE = "worker/worker_config.toml"
+_TOML_CONFIG_FILE = "worker/worker_config.toml"
 
 class PyfaasWorker:
     def __init__(self, config):
@@ -303,12 +303,12 @@ def encode_func_result(func_result: object) -> tuple[str, str]:
         return func_result_base64, "pickle_base64"
 
 
-def _send_msg(socket: socket.socket, msg: dict) -> None:
+def send_msg(socket: socket.socket, msg: dict) -> None:
     data = json.dumps(msg).encode()
     data_length = len(data).to_bytes(4, 'big')      # Big endian 4 bytes header with msg length
     socket.sendall(data_length + data)      # Sending both data length and data. Client knows when to stop reading
 
-def _recv_msg(socket: socket.socket) -> dict:
+def recv_msg(socket: socket.socket) -> dict:
     data_length_bytes = socket.recv(4)      # Receive header first
     if not data_length_bytes:
         return "EOF"         # Connection closed normally (differentiating between this and crashes/disconnections)
@@ -327,7 +327,7 @@ def _recv_msg(socket: socket.socket) -> dict:
 
 def main():
     try:
-        config = util.read_config_toml(TOML_CONFIG_FILE)
+        config = util.read_config_toml(_TOML_CONFIG_FILE)
     except Exception as e:
         logging.error(e)
         exit(0)
