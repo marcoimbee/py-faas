@@ -19,20 +19,21 @@ _TOML_CONFIG_FILE = "worker/worker_config.toml"
 
 class PyfaasWorker:
     def __init__(self, config):
-        self.host = config['network']['worker_ip_addr']
-        self.port = config['network']['worker_port']
-        self.config = config
-        self.functions = {}
-        self.stats = {}
+        self._host = config['network']['worker_ip_addr']
+        self._port = config['network']['worker_port']
+        self._config = config
+        
+        self._functions = {}
+        self._stats = {}
 
-        self.start_time = datetime.datetime.now()
-        self.requests_count = 0
-        self.last_client_connection_ts = None
+        self._start_time = datetime.datetime.now()
+        self._requests_count = 0
+        self._last_client_connection_ts = None
 
-        logging.info(config['misc']['greeting_msg'])
+        logging.info(self._config['misc']['greeting_msg'])
 
     def run(self) -> None:
-        worker_ip_port_tuple = (self.host, self.port)
+        worker_ip_port_tuple = (self._host, self._port)
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.bind(worker_ip_port_tuple)
             s.listen()
@@ -44,7 +45,7 @@ class PyfaasWorker:
                     try:
                         conn, client_addr = s.accept()
                         logging.debug(f"Worker connected by {client_addr}")
-                        self.last_client_connection_ts = datetime.datetime.now()
+                        self._last_client_connection_ts = datetime.datetime.now()
                     except socket.timeout:
                         continue
 
@@ -60,7 +61,7 @@ class PyfaasWorker:
                             
                             # Get client command. Command args are parsed in each case arm
                             cmd = json_payload["cmd"]
-                            self.requests_count += 1
+                            self._requests_count += 1
 
                             match cmd:
                                 case "register":
@@ -70,8 +71,8 @@ class PyfaasWorker:
                                     func_name = client_function.__name__
 
                                     client_json_response = None
-                                    if func_name not in self.functions:
-                                        self.functions[func_name] = client_function
+                                    if func_name not in self._functions:
+                                        self._functions[func_name] = client_function
                                         logging.info(f"Function {func_name} successfully registered")
                                         client_json_response = build_JSON_response(
                                             status="ok", 
@@ -85,7 +86,7 @@ class PyfaasWorker:
                                         if override:
                                             logging.warning(f"A function named '{func_name}' is already registered")
                                             logging.warning("Overriding...")
-                                            self.functions[func_name] = client_function
+                                            self._functions[func_name] = client_function
                                             client_json_response = build_JSON_response(
                                                 status="ok", 
                                                 action="overridden", 
@@ -105,7 +106,7 @@ class PyfaasWorker:
                                             )
                                     
                                     logging.debug("Currently registered functions:")
-                                    logging.debug(f"\t {self.functions}")
+                                    logging.debug(f"\t {self._functions}")
 
                                     # JSON payload to client
                                     send_msg(conn, client_json_response)
@@ -114,11 +115,11 @@ class PyfaasWorker:
                                     func_name = json_payload["func_name"]
 
                                     client_json_response = None
-                                    if func_name in self.functions:
+                                    if func_name in self._functions:
                                         logging.info(f"Unregistering '{func_name}'...")
-                                        del self.functions[func_name]
-                                        if self.config['statistics']['enabled']:
-                                            del self.stats[func_name]
+                                        del self._functions[func_name]
+                                        if self._config['statistics']['enabled']:
+                                            del self._stats[func_name]
                                         client_json_response = build_JSON_response(
                                             status="ok", 
                                             action="unregistered", 
@@ -137,7 +138,7 @@ class PyfaasWorker:
                                         )
 
                                     logging.debug("Currently registered functions:")
-                                    logging.debug(f"\t {self.functions}")
+                                    logging.debug(f"\t {self._functions}")
 
                                     # JSON payload to client
                                     send_msg(conn, client_json_response)
@@ -147,7 +148,7 @@ class PyfaasWorker:
                                     func_args = json_payload.get("args", [])            # Default empty list
                                     func_kwargs = json_payload.get("kwargs", {})        # Default empty dict
 
-                                    if func_name not in self.functions:
+                                    if func_name not in self._functions:
                                         logging.info(f"No function named '{func_name}' is registered right now")
                                         client_json_response = build_JSON_response(
                                             status="err", 
@@ -161,7 +162,7 @@ class PyfaasWorker:
                                         try:
                                             logging.info(f"Executing the following call: {func_name}({func_args}, {func_kwargs})")
 
-                                            client_function = self.functions[func_name]
+                                            client_function = self._functions[func_name]
 
                                             start_time = time.time()
                                             func_res = client_function(*func_args, **func_kwargs)
@@ -171,7 +172,7 @@ class PyfaasWorker:
                                             self.record_stats(func_name, exec_time)
 
                                             logging.info(f"Executed '{func_name}' for {client_addr[0]}:{client_addr[1]} in {exec_time} s")
-                                            logging.debug(f"{func_name} data: \n \t{self.stats[func_name]}")
+                                            logging.debug(f"{func_name} data: \n \t{self._stats[func_name]}")
                                             logging.debug(f"Function result: {func_res}")
 
                                             encoded_func_res, func_res_type = encode_func_result(func_res)          # JSON or base64
@@ -198,7 +199,7 @@ class PyfaasWorker:
 
                                 case "list":
                                     try:
-                                        func_list = [f for f, _ in self.functions.items()]
+                                        func_list = [f for f, _ in self._functions.items()]
                                         logging.info(f"List: retrieved {len(func_list)} functions")
 
                                         client_json_response = build_JSON_response(
@@ -227,12 +228,12 @@ class PyfaasWorker:
                                         func_name = json_payload["func_name"]
 
                                         if func_name != None:
-                                            if func_name not in self.stats:
+                                            if func_name not in self._stats:
                                                 raise Exception(f"No function named '{func_name}' is registered right now")
                                             else:
-                                                stats_for_client = self.stats[func_name]   # Send only stats for the specified function
+                                                stats_for_client = self._stats[func_name]   # Send only stats for the specified function
                                         else:
-                                            stats_for_client = self.stats   # No func name was specified, send all stats
+                                            stats_for_client = self._stats   # No func name was specified, send all stats
 
                                         client_json_response = build_JSON_response(
                                             status="ok",
@@ -261,10 +262,10 @@ class PyfaasWorker:
 
                                         # Worker identity
                                         info_summary["identity"] = {}
-                                        info_summary["identity"]["ip_address"] = self.host
-                                        info_summary["identity"]["port"] = self.port
-                                        info_summary["identity"]["start_time"] = self.start_time.isoformat()
-                                        str_uptime = str(datetime.datetime.now() - self.start_time)
+                                        info_summary["identity"]["ip_address"] = self._host
+                                        info_summary["identity"]["port"] = self._port
+                                        info_summary["identity"]["start_time"] = self._start_time.isoformat()
+                                        str_uptime = str(datetime.datetime.now() - self._start_time)
                                         info_summary["identity"]["uptime"] = str_uptime
 
                                         # System info
@@ -276,17 +277,17 @@ class PyfaasWorker:
 
                                         # Worker configuration info
                                         info_summary["config"] = {}
-                                        info_summary["config"]["enabled_statistics"] = self.config['statistics']['enabled']
-                                        info_summary["config"]["log_level"] = self.config["misc"]["log_level"]
+                                        info_summary["config"]["enabled_statistics"] = self._config['statistics']['enabled']
+                                        info_summary["config"]["log_level"] = self._config["misc"]["log_level"]
 
                                         # Function info
                                         info_summary["functions"] = {}
-                                        info_summary["functions"] = self.functions
+                                        info_summary["functions"] = self._functions
 
                                         # Network info
                                         info_summary["network"] = {}
-                                        info_summary["network"]["requests_count"] = self.requests_count
-                                        info_summary["network"]["last_client_connection_timestamp"] = str(self.last_client_connection_ts)
+                                        info_summary["network"]["requests_count"] = self._requests_count
+                                        info_summary["network"]["last_client_connection_timestamp"] = str(self._last_client_connection_ts)
 
                                         client_json_response = build_JSON_response(
                                             status="ok",
@@ -330,17 +331,17 @@ class PyfaasWorker:
                 logging.info("Goodbye")
 
     def record_stats(self, func_name: str, exec_time: float) -> None:
-        if self.config['statistics']['enabled']:
-            if func_name not in self.stats:
-                self.stats[func_name] = {}
-                self.stats[func_name]["#calls"] = 1
-                self.stats[func_name]["avg_exec_time"] = exec_time
-                self.stats[func_name]["tot_exec_time"] = exec_time
+        if self._config['statistics']['enabled']:
+            if func_name not in self._stats:
+                self._stats[func_name] = {}
+                self._stats[func_name]["#calls"] = 1
+                self._stats[func_name]["avg_exec_time"] = exec_time
+                self._stats[func_name]["tot_exec_time"] = exec_time
             else:
-                self.stats[func_name]["#calls"] += 1
-                self.stats[func_name]["tot_exec_time"] += exec_time
-                avg_exec_time = self.stats[func_name]["tot_exec_time"] / self.stats[func_name]["#calls"]
-                self.stats[func_name]["avg_exec_time"] = avg_exec_time
+                self._stats[func_name]["#calls"] += 1
+                self._stats[func_name]["tot_exec_time"] += exec_time
+                avg_exec_time = self._stats[func_name]["tot_exec_time"] / self._stats[func_name]["#calls"]
+                self._stats[func_name]["avg_exec_time"] = avg_exec_time
         else:
             logging.info("Statistics have not been enabled")    
             
