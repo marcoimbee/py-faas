@@ -36,9 +36,13 @@ worker_port = 2000
 [statistics]
 enabled = true
 
+[logging]
+log_level = "info"
+log_directory = "worker/logs"
+log_filename = "worker_log.log"
+
 [misc]
 greeting_msg = "Hello brother"
-log_level = "info"
 ```
 - `[network]` section: contains all the necessary networking fields to be able to contact the worker
     - `worker_ip_addr`: the IP address to which the worker will be reachable.
@@ -46,9 +50,12 @@ log_level = "info"
     - Given this example file, the worker will be reachable at `192.168.1.12:2000`.
 - `[statistics]` section: contains configuration options for the metrics gathering capabilities of the worker
     - `enabled`: if `true`, allows the worker to collect metrics related to functions' execution. If `false`, statistics gathering is disabled.
+- `[logging]`: logging configuration options.
+    - `[log_level]`: the logging level of the worker on stdout. Logging can be disabled by specifying `""` for this field
+    - `[log_directory]`: destination directory of the worker log file. If non-existent, it is created upon worker start.
+    - `[log_filename]`: filename of the worker log file. Log lines are dumped in append mode.
 - `[misc]`: miscellaneous configuration options
     - `greeting_msg`: a greeting message that will be printed to stdout when the worker starts (merely for testing purposes).
-    - `log_level`: the logging level of the worker on stdout. Logging can be disabled by specifying `""` for this field.
 
 ## Client TOML configuration file
 The client using the library can setup the communication with a remote worker using a TOML configuration file as well. The fields are the following:
