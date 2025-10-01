@@ -261,6 +261,33 @@ def pyfaas_exec(func_name: str, func_arglist: list[object], func_kwargslist: dic
         logging.warning(f"Error while executing '{func_name}' on the worker: {message}")
         return -1
 
+def pyfaas_get_worker_info() -> int | dict:
+    if not _PYFAAS_CONFIGURED:
+        logging.warning("PyFaaS was not previously configured by calling pyfaas_config()")
+        pyfaas_config()
+
+    global _CLIENT_SOCKET
+
+    cmd = "get_worker_info"
+    json_payload = {
+        "cmd": cmd
+    }
+    
+    # Send to worker through socket
+    _send_msg(_CLIENT_SOCKET, json_payload)
+    
+    # Get worker payload
+    worker_resp_json = _recv_msg(_CLIENT_SOCKET)
+
+    status = worker_resp_json.get("status")
+    result = worker_resp_json.get("result")
+    message = worker_resp_json.get("message")
+
+    if status == "ok":
+        return result
+    else:
+        logging.warning(f"Error while retrieving worker info: {message}")
+        return -1
 
 def pyfaas_ping() -> None:
     if not _PYFAAS_CONFIGURED:

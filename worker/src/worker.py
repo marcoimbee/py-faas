@@ -6,6 +6,8 @@ import time
 import json
 import base64
 import datetime
+import platform
+import os
 
 logging.basicConfig(
     format='[WORKER, %(levelname)s]    %(message)s',
@@ -23,6 +25,10 @@ class PyfaasWorker:
         self.functions = {}
         self.stats = {}
 
+        self.start_time = datetime.datetime.now()
+        self.requests_count = 0
+        self.last_client_connection_ts = None
+
         logging.info(config['misc']['greeting_msg'])
 
     def run(self) -> None:
@@ -38,6 +44,7 @@ class PyfaasWorker:
                     try:
                         conn, client_addr = s.accept()
                         logging.debug(f"Worker connected by {client_addr}")
+                        self.last_client_connection_ts = datetime.datetime.now()
                     except socket.timeout:
                         continue
 
@@ -53,6 +60,7 @@ class PyfaasWorker:
                             
                             # Get client command. Command args are parsed in each case arm
                             cmd = json_payload["cmd"]
+                            self.requests_count += 1
 
                             match cmd:
                                 case "register":
@@ -242,6 +250,59 @@ class PyfaasWorker:
                                             status="err", 
                                             action=None, 
                                             result_type="json", 
+                                            result=None,
+                                            message=f"{e}"
+                                        )
+                                        send_msg(conn, client_json_response)
+
+                                case "get_worker_info":
+                                    try:
+                                        info_summary = {}
+
+                                        # Worker identity
+                                        info_summary["identity"] = {}
+                                        info_summary["identity"]["ip_address"] = self.host
+                                        info_summary["identity"]["port"] = self.port
+                                        info_summary["identity"]["start_time"] = self.start_time.isoformat()
+                                        str_uptime = str(datetime.datetime.now() - self.start_time)
+                                        info_summary["identity"]["uptime"] = str_uptime
+
+                                        # System info
+                                        info_summary["system"] = {}
+                                        info_summary["system"]["python_version"] = platform.python_version()
+                                        info_summary["system"]["OS"] = platform.system()
+                                        info_summary["system"]["CPU"] = platform.processor()
+                                        info_summary["system"]["cores"] = os.cpu_count() or 1   # Fallback to 1 if unable to determine
+
+                                        # Worker configuration info
+                                        info_summary["config"] = {}
+                                        info_summary["config"]["enabled_statistics"] = self.config['statistics']['enabled']
+                                        info_summary["config"]["log_level"] = self.config["misc"]["log_level"]
+
+                                        # Function info
+                                        info_summary["functions"] = {}
+                                        info_summary["functions"] = self.functions
+
+                                        # Network info
+                                        info_summary["network"] = {}
+                                        info_summary["network"]["requests_count"] = self.requests_count
+                                        info_summary["network"]["last_client_connection_timestamp"] = str(self.last_client_connection_ts)
+
+                                        client_json_response = build_JSON_response(
+                                            status="ok",
+                                            action=None,
+                                            result_type="json",
+                                            result=info_summary,
+                                            message=None
+                                        )
+
+                                        send_msg(conn, client_json_response)
+
+                                    except Exception as e:
+                                        client_json_response = build_JSON_response(
+                                            status="err",
+                                            action=None,
+                                            result_type="json",
                                             result=None,
                                             message=f"{e}"
                                         )
