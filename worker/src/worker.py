@@ -14,7 +14,6 @@ logging.basicConfig(
 )
 
 TOML_CONFIG_FILE = "worker/worker_config.toml"
-MAX_DATA = 65536
 
 class PyfaasWorker:
     def __init__(self, config):

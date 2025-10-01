@@ -9,8 +9,6 @@ from typing import Callable
 from .util import *
 
 
-MAX_DATA = 4096
-
 # --- PyFaaS configuration
 PYFAAS_CONFIGURED: bool = False
 CONFIG_FILE_PATH: str | None = None
