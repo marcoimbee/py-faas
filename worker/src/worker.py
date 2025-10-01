@@ -43,7 +43,7 @@ class PyfaasWorker:
 
                     with conn:
                         while True:
-                            json_payload = _recv_msg(conn)
+                            json_payload = recv_msg(conn)
                             if json_payload == "EOF":
                                 logging.info(f"Client at {client_addr} closed the connection")
                                 break       # Stop processing client if the conneciton gets closed
@@ -100,7 +100,7 @@ class PyfaasWorker:
                                     logging.debug(f"\t {self.functions}")
 
                                     # JSON payload to client
-                                    _send_msg(conn, client_json_response)
+                                    send_msg(conn, client_json_response)
 
                                 case "unregister":
                                     func_name = json_payload["func_name"]
@@ -132,7 +132,7 @@ class PyfaasWorker:
                                     logging.debug(f"\t {self.functions}")
 
                                     # JSON payload to client
-                                    _send_msg(conn, client_json_response)
+                                    send_msg(conn, client_json_response)
 
                                 case "exec":
                                     func_name = json_payload["func_name"]
@@ -148,7 +148,7 @@ class PyfaasWorker:
                                             result=None, 
                                             message=f"No function named '{func_name}' is registered at the worker right now"
                                         )
-                                        _send_msg(conn, client_json_response)
+                                        send_msg(conn, client_json_response)
                                     else:
                                         try:
                                             logging.info(f"Executing the following call: {func_name}({func_args}, {func_kwargs})")
@@ -176,7 +176,7 @@ class PyfaasWorker:
                                             )
 
                                             # send back result
-                                            _send_msg(conn, client_json_response)
+                                            send_msg(conn, client_json_response)
                                             
                                         except Exception as e:
                                             client_json_response = build_JSON_response(
@@ -186,7 +186,7 @@ class PyfaasWorker:
                                                 result=None,
                                                 message=f"{type(e).__name__}: {e}"
                                             )
-                                            _send_msg(conn, client_json_response)
+                                            send_msg(conn, client_json_response)
 
                                 case "list":
                                     try:
@@ -202,7 +202,7 @@ class PyfaasWorker:
                                         )
 
                                         # send back result
-                                        _send_msg(conn, client_json_response)
+                                        send_msg(conn, client_json_response)
                                         
                                     except Exception as e:
                                         client_json_response = build_JSON_response(
@@ -212,7 +212,7 @@ class PyfaasWorker:
                                             result=None,
                                             message=f"{type(e).__name__}: {e}"
                                         )
-                                        _send_msg(conn, client_json_response)
+                                        send_msg(conn, client_json_response)
 
                                 case "get_stats":
                                     try:
@@ -235,7 +235,7 @@ class PyfaasWorker:
                                         )
 
                                         # send back result
-                                        _send_msg(conn, client_json_response)
+                                        send_msg(conn, client_json_response)
                                         
                                     except Exception as e:
                                         client_json_response = build_JSON_response(
@@ -245,7 +245,7 @@ class PyfaasWorker:
                                             result=None,
                                             message=f"{e}"
                                         )
-                                        _send_msg(conn, client_json_response)
+                                        send_msg(conn, client_json_response)
 
                                 case "kill":
                                     logging.info(f"Worker killed by client at {datetime.datetime.now()}")
@@ -260,7 +260,7 @@ class PyfaasWorker:
                                         result="PONG",
                                         message=None
                                     )
-                                    _send_msg(conn, client_json_response)
+                                    send_msg(conn, client_json_response)
 
                                 case _:
                                     logging.warning(f"Client specified unknown command '{cmd}'")
