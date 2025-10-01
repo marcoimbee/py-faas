@@ -12,10 +12,13 @@ from .util import *
 MAX_DATA = 4096
 
 # --- PyFaaS configuration
-PYFAAS_CONFIGURED = False
-CONFIG_FILE_PATH = None
-DEFAULT_CONFIG_FILE_PATH = "test/client_config.toml"
-PYFAAS_CONFIG = None
+PYFAAS_CONFIGURED: bool = False
+CONFIG_FILE_PATH: str | None = None
+DEFAULT_CONFIG_FILE_PATH: str = "test/client_config.toml"
+PYFAAS_CONFIG: dict | None = None
+
+# --- PyFaaS networking
+_CLIENT_SOCKET: socket.socket | None = None
 
 logging.basicConfig(
     format='[PYFAAS, %(levelname)s]    %(message)s',
@@ -24,7 +27,7 @@ logging.basicConfig(
 )
 
 def pyfaas_config(file_path: str = None) -> None:
-    global CONFIG_FILE_PATH, PYFAAS_CONFIG, PYFAAS_CONFIGURED
+    global CONFIG_FILE_PATH, PYFAAS_CONFIG, PYFAAS_CONFIGURED, _CLIENT_SOCKET
     if not file_path:
         logging.warning(f"Unspecified PyFaaS configuration file path, defaulting to {DEFAULT_CONFIG_FILE_PATH}")
         CONFIG_FILE_PATH = DEFAULT_CONFIG_FILE_PATH
@@ -38,6 +41,16 @@ def pyfaas_config(file_path: str = None) -> None:
 
     setup_logging(PYFAAS_CONFIG['misc']['log_level'])
 
+    if _CLIENT_SOCKET is None:
+        worker_ip_port_tuple = (
+            PYFAAS_CONFIG['network']['worker_ip_addr'],
+            PYFAAS_CONFIG['network']['worker_port']
+        )
+        _CLIENT_SOCKET = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        _CLIENT_SOCKET.settimeout(10)      # 10 s timeout -> socket closes
+        _CLIENT_SOCKET.connect(worker_ip_port_tuple)
+        logging.info(f"Persistent socket connected to {worker_ip_port_tuple}")
+
     PYFAAS_CONFIGURED = True
     logging.info(f"PyFaaS has been configured using {CONFIG_FILE_PATH}")
 
@@ -49,10 +62,10 @@ def pyfaas_register(func_code: Callable, override: bool = True) -> int:
     if not PYFAAS_CONFIGURED:
         logging.warning("PyFaaS was not previously configured by calling pyfaas_config()")
         pyfaas_config()
+
+    global _CLIENT_SOCKET
     
     cmd = "register"
-
-    worker_ip_port_tuple = (PYFAAS_CONFIG['network']['worker_ip_addr'], PYFAAS_CONFIG['network']['worker_port'])
 
     # Serializing func
     encoding_start = time.time()
@@ -68,15 +81,11 @@ def pyfaas_register(func_code: Callable, override: bool = True) -> int:
         "override": override
     }
 
-    json_payload_bytes = json.dumps(json_payload).encode()
-
     # Send to worker through socket
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.connect(worker_ip_port_tuple)
-        s.sendall(json_payload_bytes)
+    _send_msg(_CLIENT_SOCKET, json_payload)
 
-        worker_resp_bytes = s.recv(MAX_DATA)
-        worker_resp_json = json.loads(worker_resp_bytes.decode())
+    # Get worker payload
+    worker_resp_json = _recv_msg(_CLIENT_SOCKET)
 
     func_name = func_code.__name__
     status = worker_resp_json.get("status")
@@ -100,24 +109,20 @@ def pyfaas_unregister(func_name: str) -> int:
         logging.warning("PyFaaS was not previously configured by calling pyfaas_config()")
         pyfaas_config()
 
-    cmd = "unregister"
+    global _CLIENT_SOCKET
 
-    worker_ip_port_tuple = (PYFAAS_CONFIG['network']['worker_ip_addr'], PYFAAS_CONFIG['network']['worker_port'])
+    cmd = "unregister"
 
     json_payload = {                 # To be sent to server
         "cmd": cmd,
         "func_name": func_name
     }
 
-    json_payload_bytes = json.dumps(json_payload).encode()
-
     # Send to worker through socket
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.connect(worker_ip_port_tuple)
-        s.sendall(json_payload_bytes)
+    _send_msg(_CLIENT_SOCKET, json_payload)
 
-        worker_resp_bytes = s.recv(MAX_DATA)
-        worker_resp_json = json.loads(worker_resp_bytes.decode())
+    # Get worker payload
+    worker_resp_json = _recv_msg(_CLIENT_SOCKET)
 
     status = worker_resp_json.get("status")
     action = worker_resp_json.get("action")
@@ -134,6 +139,8 @@ def pyfaas_get_stats(func_name: str = None) -> int | dict:
     if not PYFAAS_CONFIGURED:
         logging.warning("PyFaaS was not previously configured by calling pyfaas_config()")
         pyfaas_config()
+
+    global _CLIENT_SOCKET
     
     cmd = "get_stats"
 
@@ -142,13 +149,11 @@ def pyfaas_get_stats(func_name: str = None) -> int | dict:
         "func_name": func_name
     }
 
-    worker_ip_port_tuple = (PYFAAS_CONFIG['network']['worker_ip_addr'], PYFAAS_CONFIG['network']['worker_port'])
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.connect(worker_ip_port_tuple)
-        s.sendall(json.dumps(json_payload).encode())
+    # Send to worker through socket
+    _send_msg(_CLIENT_SOCKET, json_payload)
 
-        worker_resp_bytes = s.recv(MAX_DATA)
-        worker_resp_json = json.loads(worker_resp_bytes.decode())
+    # Get worker payload
+    worker_resp_json = _recv_msg(_CLIENT_SOCKET)
 
     status = worker_resp_json.get("status")
     json_stats = worker_resp_json.get("result")
@@ -174,17 +179,17 @@ def pyfaas_kill_worker() -> None:
         logging.warning("PyFaaS was not previously configured by calling pyfaas_config()")
         pyfaas_config()
 
+    global _CLIENT_SOCKET
+
     cmd = "kill"
-    logging.debug(f"Called pyfaas_kill_worker")
 
     json_payload = {
         "cmd": cmd
     }
     
-    worker_ip_port_tuple = (PYFAAS_CONFIG['network']['worker_ip_addr'], PYFAAS_CONFIG['network']['worker_port'])
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.connect(worker_ip_port_tuple)
-        s.sendall(json.dumps(json_payload).encode())
+    # Send to worker through socket
+    _send_msg(_CLIENT_SOCKET, json_payload)
+
     logging.info("Worker killed by client")
 
 def pyfaas_list() -> int | list[str]:
@@ -192,23 +197,19 @@ def pyfaas_list() -> int | list[str]:
         logging.warning("PyFaaS was not previously configured by calling pyfaas_config()")
         pyfaas_config()
 
-    cmd = "list"
+    global _CLIENT_SOCKET
 
-    worker_ip_port_tuple = (PYFAAS_CONFIG['network']['worker_ip_addr'], PYFAAS_CONFIG['network']['worker_port'])
+    cmd = "list"
 
     json_payload = {                 # To be sent to server
         "cmd": cmd
     }
 
-    json_payload_bytes = json.dumps(json_payload).encode()
-
     # Send to worker through socket
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.connect(worker_ip_port_tuple)
-        s.sendall(json_payload_bytes)
+    _send_msg(_CLIENT_SOCKET, json_payload)
 
-        worker_resp_bytes = s.recv(MAX_DATA)
-        worker_resp_json = json.loads(worker_resp_bytes.decode())
+    # Get worker payload
+    worker_resp_json = _recv_msg(_CLIENT_SOCKET)
 
     status = worker_resp_json.get("status")
     func_list = worker_resp_json.get("result")
@@ -221,16 +222,16 @@ def pyfaas_list() -> int | list[str]:
         logging.warning(f"Error while listing functions on the worker: {message}")
         return -1
 
-def pyfaas_exec(func_name: str, func_arglist: list[object], func_kwargslist: list[object]) -> object:
+def pyfaas_exec(func_name: str, func_arglist: list[object], func_kwargslist: dict[str, object]) -> object:
     if not PYFAAS_CONFIGURED:
         logging.warning("PyFaaS was not previously configured by calling pyfaas_config()")
         pyfaas_config()
 
+    global _CLIENT_SOCKET
+
     cmd = "exec"
     
     logging.debug(f"Called faas_exec. Args: {func_name, func_arglist, func_kwargslist}")
-
-    worker_ip_port_tuple = (PYFAAS_CONFIG['network']['worker_ip_addr'], PYFAAS_CONFIG['network']['worker_port'])
 
     json_payload = {                 # To be sent to server
         "cmd": cmd,
@@ -239,16 +240,11 @@ def pyfaas_exec(func_name: str, func_arglist: list[object], func_kwargslist: lis
         "kwargs": func_kwargslist,
         "additional_data": None
     }
-
-    json_payload_bytes = json.dumps(json_payload).encode()
-
     # Send to worker through socket
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.connect(worker_ip_port_tuple)
-        s.sendall(json_payload_bytes)
+    _send_msg(_CLIENT_SOCKET, json_payload)
 
-        worker_resp_bytes = s.recv(MAX_DATA)
-        worker_resp_json = json.loads(worker_resp_bytes.decode())
+    # Get worker payload
+    worker_resp_json = _recv_msg(_CLIENT_SOCKET)
 
     status = worker_resp_json.get("status")
     action = worker_resp_json.get("action")
@@ -272,15 +268,46 @@ def pyfaas_ping() -> None:
     if not PYFAAS_CONFIGURED:
         logging.warning("PyFaaS was not previously configured by calling pyfaas_config()")
         pyfaas_config()
+
+    global _CLIENT_SOCKET
+
     cmd = "PING"
     json_payload = {
         "cmd": cmd
     }
     
-    worker_ip_port_tuple = (PYFAAS_CONFIG['network']['worker_ip_addr'], PYFAAS_CONFIG['network']['worker_port'])
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.connect(worker_ip_port_tuple)
-        s.sendall(json.dumps(json_payload).encode())
-        worker_response = s.recv(MAX_DATA)
-        worker_response = worker_response.decode()
-        logging.info(f"Worker says '{worker_response}'")
+    # Send to worker through socket
+    _send_msg(_CLIENT_SOCKET, json_payload)
+    
+    # Get worker payload
+    worker_resp_json = _recv_msg(_CLIENT_SOCKET)
+
+    status = worker_resp_json.get("status")
+    result = worker_resp_json.get("result")
+    message = worker_resp_json.get("message")
+
+    if status == "ok":
+        logging.info(f"Worker says: '{result}'")
+    else:
+        logging.warning(f"Error while executing  on the worker: {message}")
+
+
+def _send_msg(socket: socket.socket, msg: dict) -> None:
+    data = json.dumps(msg).encode()
+    data_length = len(data).to_bytes(4, 'big')      # Big endian 4 bytes header with msg length
+    socket.sendall(data_length + data)      # Sending both data length and data. Worker knows when to stop reading
+
+def _recv_msg(socket: socket.socket) -> dict:
+    data_length_bytes = socket.recv(4)      # Receive header first
+    if not data_length_bytes:
+        return None         # Connection closed
+    data_length = int.from_bytes(data_length_bytes, 'big')
+
+    data = b''
+    while len(data) < data_length:
+        pkt = socket.recv(data_length - len(data))
+        if not pkt:
+            return None         # Connection closed in the middle of the msg
+        data += pkt
+    
+    return json.loads(data.decode())
