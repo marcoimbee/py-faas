@@ -9,6 +9,8 @@ import datetime
 import platform
 import os
 
+from file_logger import FileLogger
+
 logging.basicConfig(
     format='[WORKER, %(levelname)s]    %(message)s',
     level=logging.ERROR,   # default until config is loaded
@@ -22,6 +24,13 @@ class PyfaasWorker:
         self._host = config['network']['worker_ip_addr']
         self._port = config['network']['worker_port']
         self._config = config
+
+        self._file_logger = FileLogger(
+            self._config['logging']['log_directory'],
+            self._config['logging']['log_filename'],
+            self._host,
+            self._port
+        )
         
         self._functions = {}
         self._stats = {}
@@ -45,6 +54,7 @@ class PyfaasWorker:
                     try:
                         conn, client_addr = s.accept()
                         logging.debug(f"Worker connected by {client_addr}")
+                        self._file_logger.log("INFO", f"Client connected: {client_addr}")
                         self._last_client_connection_ts = datetime.datetime.now()
                     except socket.timeout:
                         continue
@@ -54,9 +64,11 @@ class PyfaasWorker:
                             json_payload = recv_msg(conn)
                             if json_payload == "EOF":
                                 logging.info(f"Client at {client_addr} closed the connection")
+                                self._file_logger.log("INFO", f"Client disconnected: {client_addr}")
                                 break       # Stop processing client if the conneciton gets closed
                             elif json_payload is None:      # Client crash
                                 logging.warning(f"Client at {client_addr} closed the connection unexpectedly")
+                                self._file_logger.log("WARNING", f"Client disconnected unexpectedly: {client_addr}")
                                 break
                             
                             # Get client command. Command args are parsed in each case arm
@@ -74,6 +86,7 @@ class PyfaasWorker:
                                     if func_name not in self._functions:
                                         self._functions[func_name] = client_function
                                         logging.info(f"Function {func_name} successfully registered")
+                                        self._file_logger.log("INFO", f"Function registration: '{func_name}'")
                                         client_json_response = build_JSON_response(
                                             status="ok", 
                                             action="registered", 
@@ -117,6 +130,7 @@ class PyfaasWorker:
                                     client_json_response = None
                                     if func_name in self._functions:
                                         logging.info(f"Unregistering '{func_name}'...")
+                                        self._file_logger.log("INFO", f"Function unregistration: {func_name}")
                                         del self._functions[func_name]
                                         if self._config['statistics']['enabled']:
                                             del self._stats[func_name]
@@ -183,6 +197,8 @@ class PyfaasWorker:
                                                 result=encoded_func_res,
                                                 message=None
                                             )
+
+                                            self._file_logger.log("INFO", f"Executed {func_name}({func_args}, {func_kwargs}) in {exec_time}")
 
                                             # send back result
                                             send_msg(conn, client_json_response)
@@ -311,6 +327,7 @@ class PyfaasWorker:
 
                                 case "kill":
                                     logging.info(f"Worker killed by client at {datetime.datetime.now()}")
+                                    self._file_logger.log("INFO", f"Worker killed by client")
                                     return
 
                                 case "PING":
@@ -325,6 +342,7 @@ class PyfaasWorker:
                                     send_msg(conn, client_json_response)
 
                                 case _:
+                                    self._file_logger.log("WARNING", f"Unknown command: '{cmd}'")
                                     logging.warning(f"Client specified unknown command '{cmd}'")
 
             except KeyboardInterrupt:
@@ -394,7 +412,7 @@ def main():
         logging.error(e)
         exit(0)
 
-    util.setup_logging(config['misc']['log_level'])
+    util.setup_logging(config['logging']['log_level'])
 
     worker = PyfaasWorker(config)
     worker.run()

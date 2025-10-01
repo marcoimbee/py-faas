@@ -205,3 +205,4 @@ __marimo__/
 
 # NOT PYTHON-RELATED FILES/DIRS TO BE IGNORED
 TODO.md
+worker/logs/*
