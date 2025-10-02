@@ -41,6 +41,9 @@ log_level = "info"
 log_directory = "worker/logs"
 log_filename = "worker_log.log"
 
+[behavior]
+shutdown_persistence = true
+
 [misc]
 greeting_msg = "Hello brother"
 ```
@@ -54,6 +57,8 @@ greeting_msg = "Hello brother"
     - `[log_level]`: the logging level of the worker on stdout. Logging can be disabled by specifying `""` for this field
     - `[log_directory]`: destination directory of the worker log file. If non-existent, it is created upon worker start.
     - `[log_filename]`: filename of the worker log file. Log lines are dumped in append mode.
+- `[behavior]`: worker behavior configuration options (how the worker will behave)
+    - `shutdown_persistence`: if `true`, saves the status of the worker when shut down. When restarted, the worker will load the saved status. If `false`, the worker will not save its state, and will be reset at each restart.
 - `[misc]`: miscellaneous configuration options
     - `greeting_msg`: a greeting message that will be printed to stdout when the worker starts (merely for testing purposes).
 

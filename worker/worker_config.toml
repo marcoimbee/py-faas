@@ -5,8 +5,11 @@ worker_port = 65432
 [misc]
 greeting_msg = "Hello brother"
 
+[behavior]
+shutdown_persistence = true
+
 [logging]
-log_level = "info"
+log_level = "debug"
 log_directory = "worker/logs"
 log_filename = "worker_log.log"
 

@@ -19,6 +19,7 @@ logging.basicConfig(
 )
 
 _TOML_CONFIG_FILE = "worker/worker_config.toml"
+_WORKER_DATA_DUMP_FILE = "worker/worker_dump.bin"
 
 class PyfaasWorker:
     def __init__(self, config):
@@ -26,331 +27,292 @@ class PyfaasWorker:
         self._port = config['network']['worker_port']
         self._config = config
 
+        logging.debug(self._config['misc']['greeting_msg'])
+
         self._file_logger = FileLogger(
             self._config['logging']['log_directory'],
             self._config['logging']['log_filename'],
             self._host,
             self._port
         )
-        
-        self._functions = {}
-        self._stats = {}
+
+        if self._config["behavior"]["shutdown_persistence"] and os.path.exists(_WORKER_DATA_DUMP_FILE):
+            try:
+                worker_state = self._load_worker_state()
+                self._functions = worker_state["functions"]
+                self._stats = worker_state["stats"]
+                self._request_count = worker_state["request_count"]
+                logging.debug(f"Functions: {self._functions}")
+                logging.debug(f"Stats: {self._stats}")
+                logging.debug(f"Request count: {self._request_count}")
+            except Exception as e:
+                logging.error(f"Shutdown persistence enabled but unable to load worker state: {e}")
+                logging.info("Worker will resort to classical initialization. Structures will be empty")
+                self._functions = {}
+                self._stats = {}
+                self._request_count = 0
+        else:
+            self._functions = {}
+            self._stats = {}
+            self._request_count = 0
 
         self._start_time = datetime.datetime.now()
-        self._requests_count = 0
         self._last_client_connection_ts = None
-
-        logging.info(self._config['misc']['greeting_msg'])
 
     def run(self) -> None:
         worker_ip_port_tuple = (self._host, self._port)
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             s.bind(worker_ip_port_tuple)
             s.listen()
             s.settimeout(1.0)     # To be able to catch ctrl+c
             logging.info(f"Worker reachable at: {worker_ip_port_tuple[0]}:{worker_ip_port_tuple[1]}")
             
-            try:
-                while True:
-                    try:
-                        conn, client_addr = s.accept()
-                        logging.debug(f"Worker connected by {client_addr}")
-                        self._file_logger.log("INFO", f"Client connected: {client_addr}")
-                        self._last_client_connection_ts = datetime.datetime.now()
-                    except socket.timeout:
-                        continue
+            running = True
+            while running:
+                try:
+                    conn, client_addr = s.accept()
+                    logging.debug(f"Worker connected by {client_addr}")
+                    self._file_logger.log("INFO", f"Client connected: {client_addr}")
+                    self._last_client_connection_ts = datetime.datetime.now()
+                except socket.timeout:
+                    continue
+                except Exception as e:
+                    logging.erorr("Unexpected")
+                    break
 
-                    with conn:
-                        while True:
-                            json_payload = self._recv_msg(conn)
-                            if json_payload == "EOF":
-                                logging.info(f"Client at {client_addr} closed the connection")
-                                self._file_logger.log("INFO", f"Client disconnected: {client_addr}")
-                                break       # Stop processing client if the conneciton gets closed
-                            elif json_payload is None:      # Client crash
-                                logging.warning(f"Client at {client_addr} closed the connection unexpectedly")
-                                self._file_logger.log("WARNING", f"Client disconnected unexpectedly: {client_addr}")
-                                break
-                            
-                            # Get client command. Command args are parsed in each case arm
-                            cmd = json_payload["cmd"]
-                            self._requests_count += 1
+                with conn:
+                    while running:
+                        json_payload = self._recv_msg(conn)
+                        if json_payload == "EOF":
+                            logging.info(f"Client at {client_addr} closed the connection")
+                            self._file_logger.log("INFO", f"Client disconnected: {client_addr}")
+                            break       # Stop processing client if the conneciton gets closed
+                        elif json_payload is None:      # Client crash
+                            logging.warning(f"Client at {client_addr} closed the connection unexpectedly")
+                            self._file_logger.log("WARNING", f"Client disconnected unexpectedly: {client_addr}")
+                            break
+                        
+                        # Get client command. Command args are parsed in each case arm
+                        cmd = json_payload["cmd"]
+                        self._request_count += 1
 
-                            match cmd:
-                                case "register":
-                                    serialized_func_base64 = json_payload["serialized_func_base64"]
-                                    serialized_func_bytes = base64.b64decode(serialized_func_base64)
-                                    client_function = dill.loads(serialized_func_bytes)
-                                    func_name = client_function.__name__
+                        match cmd:
+                            case "register":
+                                self._execute_register_cmd(conn, json_payload)
 
-                                    func_params = inspect.signature(client_function)
-                                    logging.debug(f"Params: {func_params}")
+                            case "unregister":
+                                self._execute_unregister_cmd(conn, json_payload)
 
-                                    client_json_response = None
-                                    if func_name not in self._functions:
-                                        self._functions[func_name] = client_function
-                                        logging.info(f"Function {func_name} successfully registered")
-                                        self._file_logger.log("INFO", f"Function registration: '{func_name}'")
-                                        client_json_response = self._build_JSON_response(
-                                            status="ok", 
-                                            action="registered", 
-                                            result_type=None, 
-                                            result=None,
-                                            message=None
-                                        )
-                                    else:
-                                        override = json_payload["override"]
-                                        if override:
-                                            logging.warning(f"A function named '{func_name}' is already registered")
-                                            logging.warning("Overriding...")
-                                            self._functions[func_name] = client_function
-                                            client_json_response = self._build_JSON_response(
-                                                status="ok", 
-                                                action="overridden", 
-                                                result_type=None, 
-                                                result=None, 
-                                                message=None
-                                            )
-                                        else:
-                                            logging.warning(f"A function named '{func_name}' is already registered")
-                                            logging.warning(f"Function '{func_name}' will not be overridden")
-                                            client_json_response = self._build_JSON_response(
-                                                status="ok", 
-                                                action="no_action", 
-                                                result_type=None, 
-                                                result=None, 
-                                                message=None
-                                            )
+                            case "exec":
+                                self._execute_exec_cmd(conn, json_payload, client_addr)
+
+                            case "list":
+                                self._execute_list_cmd(conn)
+
+                            case "get_stats":
+                                self._execute_get_stats_cmd(conn, json_payload)
                                     
-                                    logging.debug("Currently registered functions:")
-                                    logging.debug(f"\t {self._functions}")
+                            case "get_worker_info":
+                                self._execute_get_worker_info_cmd(conn)
 
-                                    # JSON payload to client
-                                    self._send_msg(conn, client_json_response)
+                            case "kill":
+                                running = self._execute_kill_cmd(conn)
+                                break
 
-                                case "unregister":
-                                    func_name = json_payload["func_name"]
+                            case "PING":
+                                self._execute_ping_cmd(conn, cmd)
 
-                                    client_json_response = None
-                                    if func_name in self._functions:
-                                        logging.info(f"Unregistering '{func_name}'...")
-                                        self._file_logger.log("INFO", f"Function unregistration: {func_name}")
-                                        del self._functions[func_name]
-                                        if self._config['statistics']['enabled']:
-                                            del self._stats[func_name]
-                                        client_json_response = self._build_JSON_response(
-                                            status="ok", 
-                                            action="unregistered", 
-                                            result_type=None, 
-                                            result=None, 
-                                            message=None
-                                        )
-                                    else:
-                                        logging.info(f"No function named '{func_name}' is registered right now")
-                                        client_json_response = self._build_JSON_response(
-                                            status="err", 
-                                            action="no_func", 
-                                            result_type=None, 
-                                            result=None, 
-                                            message=f"No function named '{func_name}' is registered at the worker right now"
-                                        )
+                            case _:
+                                self._file_logger.log("WARNING", f"Unknown command: '{cmd}'")
+                                logging.warning(f"Client specified unknown command '{cmd}'")
+            # Fallback
+            self.cleanup()
+            logging.info("Goodbye")
 
-                                    logging.debug("Currently registered functions:")
-                                    logging.debug(f"\t {self._functions}")
+    def _execute_kill_cmd(self, conn):
+        logging.info(f"Worker killed by client at {datetime.datetime.now()}")
+        self._file_logger.log("INFO", f"Worker killed by client")
+        self.cleanup()
+        return False
 
-                                    # JSON payload to client
-                                    self._send_msg(conn, client_json_response)
+    def _execute_ping_cmd(self, conn, cmd):
+        logging.info(f"Client says: '{cmd}'")
+        client_json_response = self._build_JSON_response("ok", None, "json", "PONG", None)
+        self._send_msg(conn, client_json_response)
 
-                                case "exec":
-                                    func_name = json_payload["func_name"]
-                                    func_args = json_payload.get("args", [])            # Default empty list
-                                    func_kwargs = json_payload.get("kwargs", {})        # Default empty dict
+    def _execute_get_worker_info_cmd(self, conn):
+        try:
+            info_summary = {}
 
-                                    if func_name not in self._functions:
-                                        logging.info(f"No function named '{func_name}' is registered right now")
-                                        client_json_response = self._build_JSON_response(
-                                            status="err", 
-                                            action="no_func", 
-                                            result_type=None, 
-                                            result=None, 
-                                            message=f"No function named '{func_name}' is registered at the worker right now"
-                                        )
-                                        self._send_msg(conn, client_json_response)
-                                    else:
-                                        try:
-                                            logging.info(f"Executing the following call: {func_name}({func_args}, {func_kwargs})")
+            # Worker identity
+            info_summary["identity"] = {}
+            info_summary["identity"]["ip_address"] = self._host
+            info_summary["identity"]["port"] = self._port
+            info_summary["identity"]["start_time"] = self._start_time.isoformat()
+            str_uptime = str(datetime.datetime.now() - self._start_time)
+            info_summary["identity"]["uptime"] = str_uptime
 
-                                            client_function = self._functions[func_name]
+            # System info
+            info_summary["system"] = {}
+            info_summary["system"]["python_version"] = platform.python_version()
+            info_summary["system"]["OS"] = platform.system()
+            info_summary["system"]["CPU"] = platform.processor()
+            info_summary["system"]["cores"] = os.cpu_count() or 1   # Fallback to 1 if unable to determine
 
-                                            start_time = time.time()
-                                            func_res = client_function(*func_args, **func_kwargs)
-                                            end_time = time.time()
+            # Worker configuration info
+            info_summary["config"] = {}
+            info_summary["config"]["enabled_statistics"] = self._config['statistics']['enabled']
+            info_summary["config"]["log_level"] = self._config["misc"]["log_level"]
 
-                                            exec_time = end_time - start_time
-                                            self._record_stats(func_name, exec_time)
+            # Function info
+            info_summary["functions"] = {}
+            info_summary["functions"] = self._functions
 
-                                            logging.info(f"Executed '{func_name}' for {client_addr[0]}:{client_addr[1]} in {exec_time} s")
-                                            logging.debug(f"{func_name} data: \n \t{self._stats[func_name]}")
-                                            logging.debug(f"Function result: {func_res}")
+            # Network info
+            info_summary["network"] = {}
+            info_summary["network"]["request_count"] = self._request_count
+            info_summary["network"]["last_client_connection_timestamp"] = str(self._last_client_connection_ts)
 
-                                            encoded_func_res, func_res_type = self._encode_func_result(func_res)          # JSON or base64
-                                            client_json_response = self._build_JSON_response(
-                                                status="ok", 
-                                                action="executed", 
-                                                result_type=func_res_type, 
-                                                result=encoded_func_res,
-                                                message=None
-                                            )
+            client_json_response = self._build_JSON_response("ok", None, "json", info_summary, None)
+            self._send_msg(conn, client_json_response)
+        except Exception as e:
+            client_json_response = self._build_JSON_response("err", None, "json", None, f"{e}")
+            self._send_msg(conn, client_json_response)
 
-                                            self._file_logger.log("INFO", f"Executed {func_name}({func_args}, {func_kwargs}) in {exec_time}")
+    def _execute_get_stats_cmd(self, conn, json_payload):
+        try:
+            func_name = json_payload["func_name"]
+            if func_name != None:
+                if func_name not in self._stats:
+                    raise Exception(f"No function named '{func_name}' is registered right now")
+                else:
+                    stats_for_client = self._stats[func_name]   # Send only stats for the specified function
+            else:
+                stats_for_client = self._stats   # No func name was specified, send all stats
 
-                                            # send back result
-                                            self._send_msg(conn, client_json_response)
-                                            
-                                        except Exception as e:
-                                            client_json_response = self._build_JSON_response(
-                                                status="err", 
-                                                action=None, 
-                                                result_type="json", 
-                                                result=None,
-                                                message=f"{type(e).__name__}: {e}"
-                                            )
-                                            self._send_msg(conn, client_json_response)
+            client_json_response = self._build_JSON_response("ok", None, "json", stats_for_client, None)
+            self._send_msg(conn, client_json_response)
+        except Exception as e:
+            client_json_response = self._build_JSON_response("err", None, "json", None, f"{e}")
+            self._send_msg(conn, client_json_response)
 
-                                case "list":
-                                    try:
-                                        func_list = [f for f, _ in self._functions.items()]
-                                        logging.info(f"List: retrieved {len(func_list)} functions")
+    def _execute_list_cmd(self, conn):
+        try:
+            func_list = [f for f, _ in self._functions.items()]
+            logging.info(f"List: retrieved {len(func_list)} functions")
 
-                                        client_json_response = self._build_JSON_response(
-                                            status="ok", 
-                                            action=None, 
-                                            result_type="json", 
-                                            result=func_list,
-                                            message=None
-                                        )
+            client_json_response = self._build_JSON_response("ok", None, "json", func_list, None)
 
-                                        # send back result
-                                        self._send_msg(conn, client_json_response)
-                                        
-                                    except Exception as e:
-                                        client_json_response = self._build_JSON_response(
-                                            status="err", 
-                                            action=None, 
-                                            result_type="json", 
-                                            result=None,
-                                            message=f"{type(e).__name__}: {e}"
-                                        )
-                                        self._send_msg(conn, client_json_response)
+            self._send_msg(conn, client_json_response)
+        except Exception as e:
+            client_json_response = self._build_JSON_response("err", None, "json", None, f"{type(e).__name__}: {e}")
+            self._send_msg(conn, client_json_response)
 
-                                case "get_stats":
-                                    try:
-                                        func_name = json_payload["func_name"]
+    def _execute_exec_cmd(self, conn, json_payload, client_addr):
+        func_name = json_payload["func_name"]
+        func_args = json_payload.get("args", [])            # Default empty list
+        func_kwargs = json_payload.get("kwargs", {})        # Default empty dict
 
-                                        if func_name != None:
-                                            if func_name not in self._stats:
-                                                raise Exception(f"No function named '{func_name}' is registered right now")
-                                            else:
-                                                stats_for_client = self._stats[func_name]   # Send only stats for the specified function
-                                        else:
-                                            stats_for_client = self._stats   # No func name was specified, send all stats
+        if func_name not in self._functions:
+            logging.info(f"No function named '{func_name}' is registered right now")
+            client_json_response = self._build_JSON_response("err", "no_func", None, None, f"No function named '{func_name}' is registered at the worker right now")
+            self._send_msg(conn, client_json_response)
+        else:
+            try:
+                logging.info(f"Executing the following call: {func_name}({func_args}, {func_kwargs})")
 
-                                        client_json_response = self._build_JSON_response(
-                                            status="ok",
-                                            action=None, 
-                                            result_type="json", 
-                                            result=stats_for_client,
-                                            message=None
-                                        )
+                client_function = self._functions[func_name]
 
-                                        # send back result
-                                        self._send_msg(conn, client_json_response)
-                                        
-                                    except Exception as e:
-                                        client_json_response = self._build_JSON_response(
-                                            status="err", 
-                                            action=None, 
-                                            result_type="json", 
-                                            result=None,
-                                            message=f"{e}"
-                                        )
-                                        self._send_msg(conn, client_json_response)
+                start_time = time.time()
+                func_res = client_function(*func_args, **func_kwargs)
+                end_time = time.time()
 
-                                case "get_worker_info":
-                                    try:
-                                        info_summary = {}
+                exec_time = end_time - start_time
+                self._record_stats(func_name, exec_time)
 
-                                        # Worker identity
-                                        info_summary["identity"] = {}
-                                        info_summary["identity"]["ip_address"] = self._host
-                                        info_summary["identity"]["port"] = self._port
-                                        info_summary["identity"]["start_time"] = self._start_time.isoformat()
-                                        str_uptime = str(datetime.datetime.now() - self._start_time)
-                                        info_summary["identity"]["uptime"] = str_uptime
+                logging.info(f"Executed '{func_name}' for {client_addr[0]}:{client_addr[1]} in {exec_time} s")
+                logging.debug(f"{func_name} data: \n \t{self._stats[func_name]}")
+                logging.debug(f"Function result: {func_res}")
 
-                                        # System info
-                                        info_summary["system"] = {}
-                                        info_summary["system"]["python_version"] = platform.python_version()
-                                        info_summary["system"]["OS"] = platform.system()
-                                        info_summary["system"]["CPU"] = platform.processor()
-                                        info_summary["system"]["cores"] = os.cpu_count() or 1   # Fallback to 1 if unable to determine
+                encoded_func_res, func_res_type = self._encode_func_result(func_res)          # JSON or base64
+                client_json_response = self._build_JSON_response("ok", "executed", func_res_type, encoded_func_res, None)
 
-                                        # Worker configuration info
-                                        info_summary["config"] = {}
-                                        info_summary["config"]["enabled_statistics"] = self._config['statistics']['enabled']
-                                        info_summary["config"]["log_level"] = self._config["misc"]["log_level"]
+                self._file_logger.log("INFO", f"Executed {func_name}({func_args}, {func_kwargs}) in {exec_time}")
+                self._send_msg(conn, client_json_response)
+            except Exception as e:
+                client_json_response = self._build_JSON_response("err", None, "json", None, f"{type(e).__name__}: {e}")
+                self._send_msg(conn, client_json_response)
 
-                                        # Function info
-                                        info_summary["functions"] = {}
-                                        info_summary["functions"] = self._functions
+    def _execute_unregister_cmd(self, conn, json_payload):
+        func_name = json_payload["func_name"]
+        client_json_response = None
+        if func_name in self._functions:
+            logging.info(f"Unregistering '{func_name}'...")
+            self._file_logger.log("INFO", f"Function unregistration: {func_name}")
+            del self._functions[func_name]
+            if self._config['statistics']['enabled']:
+                del self._stats[func_name]
+            client_json_response = self._build_JSON_response("ok", "unregistered", None, None, None)
+        else:
+            logging.info(f"No function named '{func_name}' is registered right now")
+            client_json_response = self._build_JSON_response("err", "no_func", None, None, f"No function named '{func_name}' is registered at the worker right now")
 
-                                        # Network info
-                                        info_summary["network"] = {}
-                                        info_summary["network"]["requests_count"] = self._requests_count
-                                        info_summary["network"]["last_client_connection_timestamp"] = str(self._last_client_connection_ts)
+        logging.debug("Currently registered functions:")
+        logging.debug(f"\t {self._functions}")
 
-                                        client_json_response = self._build_JSON_response(
-                                            status="ok",
-                                            action=None,
-                                            result_type="json",
-                                            result=info_summary,
-                                            message=None
-                                        )
+        self._send_msg(conn, client_json_response)
 
-                                        self._send_msg(conn, client_json_response)
+    def _execute_register_cmd(self, conn, json_payload):
+        serialized_func_base64 = json_payload["serialized_func_base64"]
+        serialized_func_bytes = base64.b64decode(serialized_func_base64)
+        client_function = dill.loads(serialized_func_bytes)
+        func_name = client_function.__name__
 
-                                    except Exception as e:
-                                        client_json_response = self._build_JSON_response(
-                                            status="err",
-                                            action=None,
-                                            result_type="json",
-                                            result=None,
-                                            message=f"{e}"
-                                        )
-                                        self._send_msg(conn, client_json_response)
+        func_params = inspect.signature(client_function)
+        logging.debug(f"Params: {func_params}")
 
-                                case "kill":
-                                    logging.info(f"Worker killed by client at {datetime.datetime.now()}")
-                                    self._file_logger.log("INFO", f"Worker killed by client")
-                                    return
+        client_json_response = None
+        if func_name not in self._functions:
+            self._functions[func_name] = client_function
+            logging.info(f"Function {func_name} successfully registered")
+            self._file_logger.log("INFO", f"Function registration: '{func_name}'")
+            client_json_response = self._build_JSON_response("ok", "registered", None, None, None)
+        else:
+            override = json_payload["override"]
+            if override:
+                logging.warning(f"A function named '{func_name}' is already registered")
+                logging.warning("Overriding...")
+                self._functions[func_name] = client_function
+                client_json_response = self._build_JSON_response("ok", "overridden", None, None, None)
+            else:
+                logging.warning(f"A function named '{func_name}' is already registered")
+                logging.warning(f"Function '{func_name}' will not be overridden")
+                client_json_response = self._build_JSON_response("ok", "no_action", None, None, None)
+        
+        logging.debug("Currently registered functions:")
+        logging.debug(f"\t {self._functions}")
 
-                                case "PING":
-                                    logging.info(f"Client says: '{cmd}'")
-                                    client_json_response = self._build_JSON_response(
-                                        status="ok",
-                                        action=None,
-                                        result_type="json",
-                                        result="PONG",
-                                        message=None
-                                    )
-                                    self._send_msg(conn, client_json_response)
+        self._send_msg(conn, client_json_response)
 
-                                case _:
-                                    self._file_logger.log("WARNING", f"Unknown command: '{cmd}'")
-                                    logging.warning(f"Client specified unknown command '{cmd}'")
+    def _dump_worker_state(self) -> None:
+        dump = {
+            "functions": self._functions,
+            "stats": self._stats,
+            "request_count": self._request_count
+        }
+        try:
+            with open(_WORKER_DATA_DUMP_FILE, "wb") as f:
+                dill.dump(dump, f)
+        except Exception as e:
+            raise Exception(e)
 
-            except KeyboardInterrupt:
-                logging.info("Goodbye")
+    def _load_worker_state(self) -> dict | None:
+        try:
+            with open(_WORKER_DATA_DUMP_FILE, "rb") as f:
+                return dill.load(f)
+        except Exception as e:
+            raise Exception(e)
 
     def _record_stats(self, func_name: str, exec_time: float) -> None:
         if self._config['statistics']['enabled']:
@@ -395,15 +357,24 @@ class PyfaasWorker:
         if not data_length_bytes:
             return "EOF"         # Connection closed normally (differentiating between this and crashes/disconnections)
         data_length = int.from_bytes(data_length_bytes, 'big')
-
         data = b''
         while len(data) < data_length:
             pkt = socket.recv(data_length - len(data))
             if not pkt:
                 return None         # Connection closed in the middle of the msg
             data += pkt
-        
         return json.loads(data.decode())
+    
+    def cleanup(self):
+        # Dump worker state to file only if enabled and if there has been at least a call (there is something to save)
+        if self._config["behavior"]["shutdown_persistence"] and self._request_count != 0:
+            try:
+                self._dump_worker_state()
+                self._file_logger.log("INFO", "Dumped worker state")
+            except Exception as e:
+                logging.error(f"Unable to dump worker state: {e}")
+                self._file_logger.log("ERROR", f"Unable to dump worker state: {e}")
+        
 
 def main():
     try:
@@ -415,7 +386,12 @@ def main():
     util.setup_logging(config['logging']['log_level'])
 
     worker = PyfaasWorker(config)
-    worker.run()
+    try:
+        worker.run()
+    except KeyboardInterrupt:
+        logging.info("Ctrl+C pressed, exiting...")
+        worker.cleanup()
+        logging.info("Goodbye")
 
 
 if __name__ == "__main__":
