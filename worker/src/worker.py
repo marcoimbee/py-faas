@@ -8,6 +8,7 @@ import base64
 import datetime
 import platform
 import os
+import inspect
 
 from file_logger import FileLogger
 
@@ -81,6 +82,9 @@ class PyfaasWorker:
                                     serialized_func_bytes = base64.b64decode(serialized_func_base64)
                                     client_function = dill.loads(serialized_func_bytes)
                                     func_name = client_function.__name__
+
+                                    func_params = inspect.signature(client_function)
+                                    logging.debug(f"Params: {func_params}")
 
                                     client_json_response = None
                                     if func_name not in self._functions:
@@ -363,7 +367,7 @@ class PyfaasWorker:
         else:
             logging.info("Statistics have not been enabled")
 
-    def _build_JSON_response(status: str, action: str, result_type: str, result: object, message: str) -> bytes:
+    def _build_JSON_response(self, status: str, action: str, result_type: str, result: object, message: str) -> bytes:
         return {
             "status": status,
             "action": action,
@@ -372,7 +376,7 @@ class PyfaasWorker:
             "message": message
         } 
 
-    def encode_func_result(func_result: object) -> tuple[str, str]:
+    def _encode_func_result(self, func_result: object) -> tuple[str, str]:
         try:
             json.dumps(func_result)      # Test JSON-serializability, return plain result if successful
             return func_result, "json"
@@ -381,12 +385,12 @@ class PyfaasWorker:
             func_result_base64 = base64.b64encode(func_result_bytes).decode()
             return func_result_base64, "pickle_base64"
             
-    def send_msg(socket: socket.socket, msg: dict) -> None:
+    def _send_msg(self, socket: socket.socket, msg: dict) -> None:
         data = json.dumps(msg).encode()
         data_length = len(data).to_bytes(4, 'big')      # Big endian 4 bytes header with msg length
         socket.sendall(data_length + data)      # Sending both data length and data. Client knows when to stop reading
 
-    def recv_msg(socket: socket.socket) -> dict:
+    def _recv_msg(self, socket: socket.socket) -> dict:
         data_length_bytes = socket.recv(4)      # Receive header first
         if not data_length_bytes:
             return "EOF"         # Connection closed normally (differentiating between this and crashes/disconnections)
