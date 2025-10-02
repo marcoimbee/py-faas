@@ -229,7 +229,10 @@ class PyfaasWorker:
                 end_time = time.time()
 
                 exec_time = end_time - start_time
-                self._record_stats(func_name, exec_time)
+                if self._config["statistics"]["enabled"]:
+                    self._record_stats(func_name, exec_time)
+                else:
+                    logging.info("Statistics have not been enabled")
 
                 logging.info(f"Executed '{func_name}' for {client_addr[0]}:{client_addr[1]} in {exec_time} s")
                 logging.debug(f"{func_name} data: \n \t{self._stats[func_name]}")
@@ -315,19 +318,17 @@ class PyfaasWorker:
             raise Exception(e)
 
     def _record_stats(self, func_name: str, exec_time: float) -> None:
-        if self._config['statistics']['enabled']:
-            if func_name not in self._stats:
-                self._stats[func_name] = {}
-                self._stats[func_name]["#calls"] = 1
-                self._stats[func_name]["avg_exec_time"] = exec_time
-                self._stats[func_name]["tot_exec_time"] = exec_time
-            else:
-                self._stats[func_name]["#calls"] += 1
-                self._stats[func_name]["tot_exec_time"] += exec_time
-                avg_exec_time = self._stats[func_name]["tot_exec_time"] / self._stats[func_name]["#calls"]
-                self._stats[func_name]["avg_exec_time"] = avg_exec_time
+        if func_name not in self._stats:
+            self._stats[func_name] = {}
+            self._stats[func_name]["#calls"] = 1
+            self._stats[func_name]["avg_exec_time"] = exec_time
+            self._stats[func_name]["tot_exec_time"] = exec_time
         else:
-            logging.info("Statistics have not been enabled")
+            self._stats[func_name]["#calls"] += 1
+            self._stats[func_name]["tot_exec_time"] += exec_time
+            avg_exec_time = self._stats[func_name]["tot_exec_time"] / self._stats[func_name]["#calls"]
+            self._stats[func_name]["avg_exec_time"] = avg_exec_time
+            
 
     def _build_JSON_response(self, status: str, action: str, result_type: str, result: object, message: str) -> bytes:
         return {
