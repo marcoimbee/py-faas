@@ -13,9 +13,9 @@ class FileLogger():
 
     def log(self, log_level: str, msg: str) -> None | str:
         timestamp = str(datetime.datetime.now())
-        log_line = f"[{timestamp}, {self._worker_ip_addr}:{self._worker_port}]\t{log_level}\t{msg}\n"
+        log_line = f'[{timestamp}, {self._worker_ip_addr}:{self._worker_port}]\t{log_level}\t{msg}\n'
         try:
-            with open(self._log_file_path, "a") as log_file:
+            with open(self._log_file_path, 'a') as log_file:
                 log_file.write(log_line)
         except Exception as e:
             raise Exception(e)

@@ -10,14 +10,14 @@ from .pyfaas import pyfaas_get_stats
 from .pyfaas import pyfaas_get_worker_info
 
 __all__ = [             # Exposing what people can import
-    "pyfaas_exec",
-    "pyfaas_config",
-    "pyfaas_ping",
-    "pyfaas_get_stats",
-    "pyfaas_kill_worker",
-    "pyfaas_register",
-    "pyfaas_unregister",
-    "pyfaas_list",
-    "pyfaas_get_stats",
-    "pyfaas_get_worker_info"
+    'pyfaas_exec',
+    'pyfaas_config',
+    'pyfaas_ping',
+    'pyfaas_get_stats',
+    'pyfaas_kill_worker',
+    'pyfaas_register',
+    'pyfaas_unregister',
+    'pyfaas_list',
+    'pyfaas_get_stats',
+    'pyfaas_get_worker_info'
 ]
