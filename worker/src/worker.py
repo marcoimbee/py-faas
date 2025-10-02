@@ -117,7 +117,8 @@ class PyfaasWorker:
                                 self._execute_get_worker_info_cmd(conn)
 
                             case "kill":
-                                running = self._execute_kill_cmd(conn)
+                                self._execute_kill_cmd()
+                                running = False
                                 break
 
                             case "PING":
@@ -130,11 +131,10 @@ class PyfaasWorker:
             self.cleanup()
             logging.info("Goodbye")
 
-    def _execute_kill_cmd(self, conn):
+    def _execute_kill_cmd(self):
         logging.info(f"Worker killed by client at {datetime.datetime.now()}")
         self._file_logger.log("INFO", f"Worker killed by client")
         self.cleanup()
-        return False
 
     def _execute_ping_cmd(self, conn, cmd):
         logging.info(f"Client says: '{cmd}'")
