@@ -6,7 +6,11 @@ worker_port = 65432
 greeting_msg = "Hello brother"
 
 [behavior]
-shutdown_persistence = true
+shutdown_persistence = false
+
+[behavior.caching]
+policy = "LRU"
+max_size = 1
 
 [logging]
 log_level = "debug"

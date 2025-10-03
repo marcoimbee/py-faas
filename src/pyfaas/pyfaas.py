@@ -220,7 +220,7 @@ def pyfaas_list() -> int | list[str]:
         logging.warning(f'Error while listing functions on the worker: {message}')
         return -1
 
-def pyfaas_exec(func_name: str, func_arglist: list[object], func_kwargslist: dict[str, object]) -> object:
+def pyfaas_exec(func_name: str, func_arglist: list[object], func_kwargslist: dict[str, object], save_in_cache: bool = False) -> object:
     if not _PYFAAS_CONFIGURED:
         logging.warning('PyFaaS was not previously configured by calling pyfaas_config()')
         pyfaas_config()
@@ -229,13 +229,14 @@ def pyfaas_exec(func_name: str, func_arglist: list[object], func_kwargslist: dic
 
     cmd = 'exec'
     
-    logging.debug(f'Called faas_exec. Args: {func_name, func_arglist, func_kwargslist}')
+    logging.debug(f'Called faas_exec. Args: {func_name, func_arglist, func_kwargslist}, save_in_cache={save_in_cache}')
 
     json_payload = {                 # To be sent to server
         'cmd': cmd,
         'func_name': func_name,
         'args': func_arglist,
         'kwargs': func_kwargslist,
+        'save_in_cache': save_in_cache,
         'additional_data': None
     }
     # Send to worker through socket
@@ -258,7 +259,7 @@ def pyfaas_exec(func_name: str, func_arglist: list[object], func_kwargslist: dic
                 result = dill.loads(result_bytes)
             return result      # it's the JSON result that was included in the worker msg, or the deserialized Base64 result
     else:
-        logging.warning(f"Error while executing '{func_name}' on the worker: {message}")
+        logging.error(f"Error while executing '{func_name}' on the worker: {message}")
         return -1
 
 def pyfaas_get_worker_info() -> int | dict:
@@ -287,6 +288,34 @@ def pyfaas_get_worker_info() -> int | dict:
         return result
     else:
         logging.warning(f'Error while retrieving worker info: {message}')
+        return -1
+    
+def pyfaas_get_cache_dump() -> int | dict:
+    if not _PYFAAS_CONFIGURED:
+        logging.warning('PyFaaS was not previously configured by calling pyfaas_config()')
+        pyfaas_config()
+
+    global _CLIENT_SOCKET
+
+    cmd = 'get_cache_dump'
+    json_payload = {
+        'cmd': cmd
+    }
+    
+    # Send to worker through socket
+    _send_msg(_CLIENT_SOCKET, json_payload)
+    
+    # Get worker payload
+    worker_resp_json = _recv_msg(_CLIENT_SOCKET)
+
+    status = worker_resp_json.get('status')
+    result = worker_resp_json.get('result')
+    message = worker_resp_json.get('message')
+
+    if status == 'ok':
+        return result
+    else:
+        logging.error(f'Error while retrieving cache dump: {message}')
         return -1
 
 def pyfaas_ping() -> None:

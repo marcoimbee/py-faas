@@ -44,6 +44,10 @@ log_filename = "worker_log.log"
 [behavior]
 shutdown_persistence = true
 
+[behavior.caching]
+policy = "LRU"
+max_size = 10
+
 [misc]
 greeting_msg = "Hello brother"
 ```
@@ -59,6 +63,9 @@ greeting_msg = "Hello brother"
     - `[log_filename]`: filename of the worker log file. Log lines are dumped in append mode.
 - `[behavior]`: worker behavior configuration options (how the worker will behave)
     - `shutdown_persistence`: if `true`, saves the status of the worker when shut down. When restarted, the worker will load the saved status. If `false`, the worker will not save its state, and will be reset at each restart.
+    - `[behavior.caching]`: configuration options for function execution caching
+        - `policy`: the replacement policy of the cache. For now, only the LRU (Least Recently Used) policy is available.
+        - `max_size`: maximum capacity of the cache. If set to 0, caching is disabled: every attempt to add an element to the cache will result in a no-op.
 - `[misc]`: miscellaneous configuration options
     - `greeting_msg`: a greeting message that will be printed to stdout when the worker starts (merely for testing purposes).
 

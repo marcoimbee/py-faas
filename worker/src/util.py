@@ -18,6 +18,13 @@ def read_config_toml(path: str) -> dict:
     except socket.error:
         raise Exception(f'Config error: invalid IP Address {config['network']['worker_ip_addr']}')
 
+    # Checking caching options validity
+    available_policies = ['LRU']
+    if config['behavior']['caching']['policy'] not in available_policies:
+        raise Exception(f"Config error: unknown caching policy '{config['behavior']['caching']['policy']}'")
+    if config['behavior']['caching']['max_size'] < 0:
+        raise Exception(f"Config error: invalid cache max size {config['behavior']['caching']['max_size']}")
+
     return config
 
     

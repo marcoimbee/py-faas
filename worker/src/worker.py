@@ -11,6 +11,7 @@ import os
 import inspect
 
 from file_logger import FileLogger
+from func_cache import WorkerFunctionExecutionCache
 
 logging.basicConfig(
     format='[WORKER, %(levelname)s]    %(message)s',
@@ -22,7 +23,7 @@ _TOML_CONFIG_FILE = 'worker/worker_config.toml'
 _WORKER_DATA_DUMP_FILE = 'worker/worker_dump.bin'
 
 class PyfaasWorker:
-    def __init__(self, config):
+    def __init__(self, config: dict):
         self._host = config['network']['worker_ip_addr']
         self._port = config['network']['worker_port']
         self._config = config
@@ -35,6 +36,15 @@ class PyfaasWorker:
             self._host,
             self._port
         )
+
+        self._function_exec_cache = WorkerFunctionExecutionCache(
+            self._config['behavior']['caching']['policy'],
+            self._config['behavior']['caching']['max_size']
+        )
+        if self._config['behavior']['caching']['max_size'] != 0:
+            logging.info('Caching is enabled')
+        else:
+            logging.info('Caching is disabled. Cache adding is a no-op')
 
         if self._config['behavior']['shutdown_persistence'] and os.path.exists(_WORKER_DATA_DUMP_FILE):
             try:
@@ -116,6 +126,9 @@ class PyfaasWorker:
                             case 'get_worker_info':
                                 self._execute_get_worker_info_cmd(conn)
 
+                            case 'get_cache_dump':
+                                self._execute_get_cache_dump_cmd(conn)
+
                             case 'kill':
                                 self._execute_kill_cmd()
                                 running = False
@@ -130,6 +143,11 @@ class PyfaasWorker:
             # Fallback
             self.cleanup()
             logging.info('Goodbye')
+
+    def _execute_get_cache_dump_cmd(self, conn):
+        cache_dump = self._function_exec_cache.get_cache_dump()
+        client_json_response = self._build_JSON_response('ok', None, 'json', cache_dump, None)
+        self._send_msg(conn, client_json_response)
 
     def _execute_kill_cmd(self):
         logging.info(f'Worker killed by client at {datetime.datetime.now()}')
@@ -211,8 +229,9 @@ class PyfaasWorker:
 
     def _execute_exec_cmd(self, conn, json_payload, client_addr):
         func_name = json_payload['func_name']
-        func_args = json_payload.get('args', [])            # Default empty list
-        func_kwargs = json_payload.get('kwargs', {})        # Default empty dict
+        func_args = json_payload.get('args', [])                # Default empty list
+        func_kwargs = json_payload.get('kwargs', {})            # Default empty dict
+        save_in_cache = json_payload.get('save_in_cache', False)  # Default to False if something weird has been specified client-side
 
         if func_name not in self._functions:
             logging.info(f"No function named '{func_name}' is registered right now")
@@ -224,24 +243,59 @@ class PyfaasWorker:
 
                 client_function = self._functions[func_name]
 
-                start_time = time.time()
-                func_res = client_function(*func_args, **func_kwargs)
-                end_time = time.time()
-
-                exec_time = end_time - start_time
-                if self._config['statistics']['enabled']:
-                    self._record_stats(func_name, exec_time)
+                # Checking for cached result
+                func_res_already_in_cache = self._function_exec_cache.check_cached(
+                    func_name,
+                    func_args,
+                    func_kwargs
+                )
+                if func_res_already_in_cache:
+                    # Result is in cache: get it
+                    try:
+                        func_res = self._function_exec_cache.get_cached_result(
+                            func_name,
+                            func_args,
+                            func_kwargs
+                        )
+                        logging.info(f'Got cached result: {func_res}')
+                        self._file_logger.log('INFO', 'Cache hit')
+                    except Exception as e:
+                        logging.error(f'Exception while fetching result from cache: {e}')
+                        self._file_logger.log('ERROR', f'Cache error: {e}')
+                        raise Exception(e)
                 else:
-                    logging.info('Statistics have not been enabled')
+                    # Result is NOT in cache
+                    start_time = time.time()
+                    func_res = client_function(*func_args, **func_kwargs)
+                    end_time = time.time()
 
-                logging.info(f"Executed '{func_name}' for {client_addr[0]}:{client_addr[1]} in {exec_time} s")
-                logging.debug(f'{func_name} data: \n \t{self._stats[func_name]}')
-                logging.debug(f'Function result: {func_res}')
+                    exec_time = end_time - start_time
+                    if self._config['statistics']['enabled']:       
+                        self._record_stats(func_name, exec_time)   # If the result is in cache, stats are not recorded for the call
+                    else:
+                        logging.info('Statistics have not been enabled')
+
+                    # Add to cache if the user wants to
+                    if save_in_cache:
+                        try:
+                            self._function_exec_cache.add(func_name, func_args, func_kwargs, func_res)
+                            logging.info(f"Result for latest '{func_name}' call has been saved to worker cache")
+                            self._file_logger.log('INFO', f"Cache update: result for latest '{func_name}' call saved to cache")
+                        except Exception as e:
+                            # This should never happen because we already checked that the
+                            # result is NOT in cache. 
+                            # However, we check for it 
+                            logging.error(f'Exception while adding result to cache: {e}')
+                            raise Exception(e)
+
+                    logging.info(f"Executed '{func_name}' for {client_addr[0]}:{client_addr[1]} in {exec_time} s")
+                    logging.debug(f'Function result: {func_res}')
+
+                    self._file_logger.log('INFO', f'Executed {func_name}({func_args}, {func_kwargs}) in {exec_time}')
 
                 encoded_func_res, func_res_type = self._encode_func_result(func_res)          # JSON or base64
                 client_json_response = self._build_JSON_response('ok', 'executed', func_res_type, encoded_func_res, None)
 
-                self._file_logger.log('INFO', f'Executed {func_name}({func_args}, {func_kwargs}) in {exec_time}')
                 self._send_msg(conn, client_json_response)
             except Exception as e:
                 client_json_response = self._build_JSON_response('err', None, 'json', None, f'{type(e).__name__}: {e}')
