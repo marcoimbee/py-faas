@@ -231,7 +231,7 @@ def pyfaas_exec(func_name: str, func_arglist: list[object], func_kwargslist: dic
     
     if func_kwargslist is None:
         func_kwargslist = {}
-        
+
     logging.debug(f'Called faas_exec. Args: {func_name, func_arglist, func_kwargslist}, save_in_cache={save_in_cache}')
 
     json_payload = {                 # To be sent to server
@@ -263,7 +263,7 @@ def pyfaas_exec(func_name: str, func_arglist: list[object], func_kwargslist: dic
             return result      # it's the JSON result that was included in the worker msg, or the deserialized Base64 result
     else:
         logging.error(f"Error while executing '{func_name}' on the worker: {message}")
-        return -1
+        raise Exception(f"Error while executing '{func_name}' on the worker: {message}")
 
 def pyfaas_get_worker_info() -> int | dict:
     if not _PYFAAS_CONFIGURED:
@@ -346,7 +346,7 @@ def pyfaas_ping() -> None:
     if status == 'ok':
         logging.info(f"Worker says: '{result}'")
     else:
-        logging.warning(f'Error while executing  on the worker: {message}')
+        logging.warning(f'Error while PING-ing the worker: {message}')
 
 
 def _send_msg(socket: socket.socket, msg: dict) -> None:
