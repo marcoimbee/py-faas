@@ -220,7 +220,7 @@ def pyfaas_list() -> int | list[str]:
         logging.warning(f'Error while listing functions on the worker: {message}')
         return -1
 
-def pyfaas_exec(func_name: str, func_arglist: list[object], func_kwargslist: dict[str, object], save_in_cache: bool = False) -> object:
+def pyfaas_exec(func_name: str, func_arglist: list[object], func_kwargslist: dict[str, object] = None, save_in_cache: bool = False) -> object:
     if not _PYFAAS_CONFIGURED:
         logging.warning('PyFaaS was not previously configured by calling pyfaas_config()')
         pyfaas_config()
@@ -229,6 +229,9 @@ def pyfaas_exec(func_name: str, func_arglist: list[object], func_kwargslist: dic
 
     cmd = 'exec'
     
+    if func_kwargslist is None:
+        func_kwargslist = {}
+        
     logging.debug(f'Called faas_exec. Args: {func_name, func_arglist, func_kwargslist}, save_in_cache={save_in_cache}')
 
     json_payload = {                 # To be sent to server

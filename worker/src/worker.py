@@ -265,9 +265,12 @@ class PyfaasWorker:
                         raise Exception(e)
                 else:
                     # Result is NOT in cache
+
+                    # --- FUNCTION EXECUTION ON WORKER ---
                     start_time = time.time()
                     func_res = client_function(*func_args, **func_kwargs)
                     end_time = time.time()
+                    # ------------------------------------
 
                     exec_time = end_time - start_time
                     if self._config['statistics']['enabled']:       
