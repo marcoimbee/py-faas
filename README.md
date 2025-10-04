@@ -254,6 +254,16 @@ Networking info:
 - `[network][last_client_connection_timestamp]`: timestamp of the last client connection handled by the worker
 
 ## Cache dump inspection
+The client is able to inspect the current state of the worker cache by invoking `pyfaas_get_cache_dump`, by which a JSON object is returned:
+```python
+from pyfaas import pyfaas_get_cache_dump
+
+dump = pyfaas_get_cache_dump()
+if dump != -1:
+    print(dump)
+else:
+    print('Error retrieving worker cache dump')
+```
 
 ## Checking if the worker is alive
 This is for testing purposes. Sends a `PING` message to the worker, expecting a `PONG` response:
