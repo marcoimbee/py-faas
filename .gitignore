@@ -207,3 +207,4 @@ __marimo__/
 TODO.md
 worker/logs/*
 worker/worker_dump.bin
+test/*
