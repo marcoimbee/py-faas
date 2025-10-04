@@ -122,20 +122,30 @@ from pyfaas import pyfaas_register, pyfaas_unregister
 def simple_function_1(a: int, b: int, c: int = 12) -> int:
     return a * b + c
 
-pyfaas_register(simple_function_1)      # Registers 'simple_function_1' at the worker's
+try:
+    # Registers 'simple_function_1' at the worker's
+    pyfaas_register(simple_function_1)
+except PyFaaSFunctionRegistrationError as e:
+    print(e)
 ```
 If a previously registered function changes code or arguments, but not its name, can be registered at the worker's by using again `pyfaas_register`, and by specifying `override=True` as an argument. This will override the previously registered function with the same name:
 ```python
 def simple_function_1(d: int) -> float:
     return d + 0.1
 
-pyfaas_register(simple_function_1, override=True)
+try:
+    pyfaas_register(simple_function_1, override=True)
+except PyFaaSFunctionRegistrationError as e:
+    print(e)
 ```
 To unregister a function:
 ```python
-# Unregisters 'simple_function_1' from the worker. 
-# To invoke it, it must be registered again
-pyfaas_unregister('simple_function_1')
+try:
+    # Unregisters 'simple_function_1' from the worker. 
+    # To invoke it, it must be registered again
+    pyfaas_unregister('simple_function_1')
+except PyFaaSFunctionUnregistrationError as e:
+    print(e)
 ```
 
 ## Remote function execution
@@ -147,14 +157,17 @@ from pyfaas import pyfaas_register, pyfaas_unregister
 def simple_function_1(a: int, b: int, c: int = 12) -> int:
     return a * b + c
 
-pyfaas_register(simple_function_1, override=True)
+try:
+    pyfaas_register(simple_function_1, override=True)
+except PyFaaSFunctionRegistrationError as e:
+    print(e)
 
 args = [5, 6]
 kwargs = {'c': 56}
 try:
     res = pyfaas_exec('simple_function_1', args, kwargs)
     print(res)
-except Exception as e:
+except PyFaaSFunctionExecutionError as e:
     print(e)
 ```
 ### Results caching
@@ -168,7 +181,7 @@ try:
     # execute and store the result in the worker's cache
     res = pyfaas_exec('simple_function_1', args, kwargs, save_in_cache=True)
     print(res)
-except Exception as e:
+except PyFaaSFunctionExecutionError as e:
     print(e)
 
 args = [5, 6]
@@ -178,7 +191,7 @@ try:
     # the worker doesn't execute the function but returns the cache-stored result
     res = pyfaas_exec('simple_function_1', args, kwargs)
     print(res)
-except Exception as e:
+except PyFaaSFunctionExecutionError as e:
     print(e)
 
 args = [10, 11]
@@ -188,7 +201,7 @@ try:
     # This time the function will be executed and the result saved in cache by the worker
     res = pyfaas_exec('simple_function_1', args, kwargs)
     print(res)
-except Exception as e:
+except PyFaaSFunctionExecutionError as e:
     print(e)
 ```
 Caching policy and maximum capcity can be configured via the worker's TOML configuration file.
@@ -199,11 +212,11 @@ Retrieves information about the currently recorded function at the worker's:
 ```python
 from pyfaas import pyfaas_list
 
-func_list = pyfaas_list()
-if func_list != -1:
+try:
+    func_list = pyfaas_list()
     print(func_list)
-else:
-    print('Error retrieving functions')
+except PyFaaSFunctionListingError as e:
+    print(e)
 ```
 
 ## Statistics retrieval
@@ -212,20 +225,19 @@ Retrieves the recorded statistics about functions' execution:
 from pyfaas import pyfaas_get_stats
 
 # Retrieving stats for a specifi function
-stats = pyfaas_get_stats('simple_function')
-if stats != -1:
+try:
+    stats = pyfaas_get_stats('simple_function')
     print(stats)
-else:
-    print('Error retrieving functions execution stats')
+except PyFaaSStatisticsRetrievalError as e:
+    print(e)
 
 # No functioin was specified, retrieve all stats
-stats = pyfaas_get_stats()
-if stats != -1:
+try:
+    stats = pyfaas_get_stats()
     print(stats)
-else:
-    print('Error retrieving functions execution stats')
+except PyFaaSStatisticsRetrievalError as e:
+    print(e)
 ```
-
 
 ## Explicit PyFaaS configuration
 PyFaaS can be configured client-side by invoking `pyfaas_config`:
@@ -233,7 +245,10 @@ PyFaaS can be configured client-side by invoking `pyfaas_config`:
 from pyfaas import pyfaas_config
 
 config_file_path = <toml-config-file>
-pyfaas_config(file_path=config_file_path)
+try:
+    pyfaas_config(file_path=config_file_path)
+except PyFaaSConfigError as e:
+    print(e)
 ```
 If a configuration file is not specified, PyFaaS will resort to a default configuration file that must be found in the project's base directory.
 
@@ -248,11 +263,11 @@ pyfaas_kill_worker()
 ```python
 from pyfaas import pyfaas_get_worker_info
 
-info = pyfaas_get_worker_info()
-if info != -1:
+try:
+    info = pyfaas_get_worker_info()
     print(info)
-else:
-    print('Error retrieving worker info')
+except PyFaaSWorkerInfoError as e:
+    print(e)
 ```
 If the call is successful, `info` is a `dict` containing information about the worker.
 
@@ -285,10 +300,10 @@ The client is able to inspect the current state of the worker cache by invoking 
 from pyfaas import pyfaas_get_cache_dump
 
 dump = pyfaas_get_cache_dump()
-if dump != -1:
+try:
     print(dump)
-else:
-    print('Error retrieving worker cache dump')
+except PyFaaSCacheDumpingException as e:
+    print(e)
 ```
 
 ## Checking if the worker is alive

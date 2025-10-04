@@ -3,7 +3,6 @@ import tomli
 import socket
 
 
-# TODO: define custom exception classes
 def read_config_toml(path: str) -> dict:
     with open(path, mode='rb') as fp:
         config = tomli.load(fp)

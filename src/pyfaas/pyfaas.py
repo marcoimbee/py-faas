@@ -7,6 +7,7 @@ import time
 from typing import Callable
 
 from .util import *
+from .exceptions import *
 
 
 # --- PyFaaS configuration
@@ -35,7 +36,7 @@ def pyfaas_config(file_path: str = None) -> None:
     try:
         _PYFAAS_CONFIG = read_config_toml(_CONFIG_FILE_PATH)
     except Exception as e:
-        raise Exception(e)
+        raise PyFaaSConfigError(e)
 
     setup_logging(_PYFAAS_CONFIG['misc']['log_level'])
 
@@ -52,11 +53,10 @@ def pyfaas_config(file_path: str = None) -> None:
     _PYFAAS_CONFIGURED = True
     logging.info(f'PyFaaS has been configured using {_CONFIG_FILE_PATH}')
 
-
 # Function name is not necessary, as it can be extracted from the code via function.__name__
 # override: if True, if the worker already has registered a function with the same name, 
 #           will override the previous one and register this new one instead with this name
-def pyfaas_register(func_code: Callable, override: bool = True) -> int:
+def pyfaas_register(func_code: Callable, override: bool = True) -> None:
     if not _PYFAAS_CONFIGURED:
         logging.warning('PyFaaS was not previously configured by calling pyfaas_config()')
         pyfaas_config()
@@ -96,13 +96,11 @@ def pyfaas_register(func_code: Callable, override: bool = True) -> int:
             logging.info(f"Successfully overridden '{func_name}'")
         elif action == 'no_action':
             logging.info(f'No action was performed')
-        return 1
     else:
         logging.warning(f'Error while registering a function: {message}')
-        return -1
+        raise PyFaaSFunctionRegistrationError(message)
 
-
-def pyfaas_unregister(func_name: str) -> int:
+def pyfaas_unregister(func_name: str) -> None:
     if not _PYFAAS_CONFIGURED:
         logging.warning('PyFaaS was not previously configured by calling pyfaas_config()')
         pyfaas_config()
@@ -131,9 +129,9 @@ def pyfaas_unregister(func_name: str) -> int:
             return 1
     elif status == 'err':
         logging.warning(f'Error while unregistering a function: {message}')
-        return -1
+        raise PyFaaSFunctionUnregistrationError(message)
 
-def pyfaas_get_stats(func_name: str = None) -> int | dict:
+def pyfaas_get_stats(func_name: str = None) -> dict:
     if not _PYFAAS_CONFIGURED:
         logging.warning('PyFaaS was not previously configured by calling pyfaas_config()')
         pyfaas_config()
@@ -169,8 +167,7 @@ def pyfaas_get_stats(func_name: str = None) -> int | dict:
             logging.error(f"Error while retrieving stats for '{func_name}': {message}")
         else:
             logging.error(f'Error while retrieving general stats: {message}')
-        return -1
-
+        raise PyFaaSStatisticsRetrievalError(message)
 
 def pyfaas_kill_worker() -> None:
     if not _PYFAAS_CONFIGURED:
@@ -190,7 +187,7 @@ def pyfaas_kill_worker() -> None:
 
     logging.info('Worker killed by client')
 
-def pyfaas_list() -> int | list[str]:
+def pyfaas_list() -> list[str]:
     if not _PYFAAS_CONFIGURED:
         logging.warning('PyFaaS was not previously configured by calling pyfaas_config()')
         pyfaas_config()
@@ -218,7 +215,7 @@ def pyfaas_list() -> int | list[str]:
         return func_list
     else:
         logging.warning(f'Error while listing functions on the worker: {message}')
-        return -1
+        raise PyFaaSFunctionListingError(message)
 
 def pyfaas_exec(func_name: str, func_arglist: list[object], func_kwargslist: dict[str, object] = None, save_in_cache: bool = False) -> object:
     if not _PYFAAS_CONFIGURED:
@@ -267,9 +264,9 @@ def pyfaas_exec(func_name: str, func_arglist: list[object], func_kwargslist: dic
             return result      # it's the JSON result that was included in the worker msg, or the deserialized Base64 result
     else:
         logging.error(f"Error while executing '{func_name}' on the worker: {message}")
-        raise Exception(f"Error while executing '{func_name}' on the worker: {message}")
+        raise PyFaaSFunctionExecutionError(message)
 
-def pyfaas_get_worker_info() -> int | dict:
+def pyfaas_get_worker_info() -> dict:
     if not _PYFAAS_CONFIGURED:
         logging.warning('PyFaaS was not previously configured by calling pyfaas_config()')
         pyfaas_config()
@@ -295,9 +292,9 @@ def pyfaas_get_worker_info() -> int | dict:
         return result
     else:
         logging.warning(f'Error while retrieving worker info: {message}')
-        return -1
+        raise PyFaaSWorkerInfoError(message)
     
-def pyfaas_get_cache_dump() -> int | dict:
+def pyfaas_get_cache_dump() -> dict:
     if not _PYFAAS_CONFIGURED:
         logging.warning('PyFaaS was not previously configured by calling pyfaas_config()')
         pyfaas_config()
@@ -323,7 +320,7 @@ def pyfaas_get_cache_dump() -> int | dict:
         return result
     else:
         logging.error(f'Error while retrieving cache dump: {message}')
-        return -1
+        raise PyFaaSCacheDumpingError(message)
 
 def pyfaas_ping() -> None:
     if not _PYFAAS_CONFIGURED:
@@ -351,7 +348,6 @@ def pyfaas_ping() -> None:
         logging.info(f"Worker says: '{result}'")
     else:
         logging.warning(f'Error while PING-ing the worker: {message}')
-
 
 def _send_msg(socket: socket.socket, msg: dict) -> None:
     data = json.dumps(msg).encode()
