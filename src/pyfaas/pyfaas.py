@@ -228,6 +228,10 @@ def pyfaas_exec(func_name: str, func_arglist: list[object], func_kwargslist: dic
     global _CLIENT_SOCKET
 
     cmd = 'exec'
+
+    if type(func_arglist) != list:
+        logging.error(f"Parameters mismatch: func_arglist must be of type 'list[object]', while {type(func_arglist)} was provided")
+        raise Exception(f"Parameters mismatch: func_arglist must be of type 'list[object]', while {type(func_arglist)} was provided")
     
     if func_kwargslist is None:
         func_kwargslist = {}
