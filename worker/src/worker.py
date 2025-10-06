@@ -129,6 +129,9 @@ class PyfaasWorker:
                             case 'get_cache_dump':
                                 self._execute_get_cache_dump_cmd(conn)
 
+                            case 'check_funciton_set_registration':
+                                self._execute_check_function_set_registration_cmd(conn, json_payload)
+
                             case 'kill':
                                 self._execute_kill_cmd()
                                 running = False
@@ -143,6 +146,21 @@ class PyfaasWorker:
             # Fallback
             self.cleanup()
             logging.info('Goodbye')
+
+    def _execute_check_function_set_registration_cmd(self, conn, json_payload):
+        func_set = json_payload['func_set']
+        try:
+            all_registered = True
+            for func in func_set:
+                if func not in self._functions:
+                    all_registered = False
+                    break
+            
+            client_json_response = self._build_JSON_response('ok', None, 'json', all_registered, None)
+            self._send_msg(conn, client_json_response)
+        except Exception as e:
+            client_json_response = self._build_JSON_response('err', None, 'json', None, f'{e}')
+            self._send_msg(conn, client_json_response)
 
     def _execute_get_cache_dump_cmd(self, conn):
         cache_dump = self._function_exec_cache.get_cache_dump()

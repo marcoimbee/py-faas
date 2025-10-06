@@ -368,3 +368,30 @@ def _recv_msg(socket: socket.socket) -> dict:
         data += pkt
     
     return json.loads(data.decode())
+
+def _is_function_set_registered(func_set: list[str]) -> bool:
+    global _CLIENT_SOCKET
+
+    cmd = 'check_funciton_set_registration'
+    json_payload = {
+        'cmd': cmd,
+        'func_set': func_set
+    }
+    
+    # Send to worker through socket
+    _send_msg(_CLIENT_SOCKET, json_payload)
+    
+    # Get worker payload
+    worker_resp_json = _recv_msg(_CLIENT_SOCKET)
+
+    status = worker_resp_json.get('status')
+    result = worker_resp_json.get('result')
+    message = worker_resp_json.get('message')
+
+    if status == 'ok':
+        # True if every function in func_set is registered at the worker
+        # False otherwise
+        return result
+    else:
+        logging.error(f'Error while checking function set registration: {message}')
+        raise PyFaaSFunctionSetRegistrationCheckError(message)

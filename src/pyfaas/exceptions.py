@@ -27,3 +27,6 @@ class PyFaaSCacheDumpingError(PyFaaSError):
 
 class PyFaaSStatisticsRetrievalError(PyFaaSError):
     pass
+
+class PyFaaSFunctionSetRegistrationCheckError(PyFaaSError):
+    pass
