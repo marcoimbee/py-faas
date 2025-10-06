@@ -30,3 +30,6 @@ class PyFaaSStatisticsRetrievalError(PyFaaSError):
 
 class PyFaaSFunctionSetRegistrationCheckError(PyFaaSError):
     pass
+
+class PyFaaSWorkflowValidationError(PyFaaSError):
+    pass

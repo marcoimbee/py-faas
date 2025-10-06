@@ -322,6 +322,31 @@ def pyfaas_get_cache_dump() -> dict:
         logging.error(f'Error while retrieving cache dump: {message}')
         raise PyFaaSCacheDumpingError(message)
 
+def pyfaas_load_workflow(workflow_file_path: str) -> dict[str, dict[str, object]]:
+    if not _PYFAAS_CONFIGURED:
+        logging.warning('PyFaaS was not previously configured by calling pyfaas_config()')
+        pyfaas_config()
+    try:
+        with open(workflow_file_path) as content:
+            json_workflow = json.load(content)
+            return json_workflow
+    except Exception as e:
+        logging.error(f'Error while loading the workflow: {e}')
+
+def pyfaas_chain_exec(json_workflow: dict[str, dict[str, object]]):
+    # No need to call pyfaas_config(), as functions need to be registered first
+    # and pyfaas_register() calls pyfaas_config() itself if the user didn't before
+    try:
+        _validate_json_workflow_structure(json_workflow)
+    except PyFaaSWorkflowValidationError as e:
+        logging.error(f'Error while validating the workflow: {e}')
+        raise PyFaaSWorkflowValidationError(e)
+    
+    # If here, workflow is STRUCTURALLY valid
+
+    pass
+
+
 def pyfaas_ping() -> None:
     if not _PYFAAS_CONFIGURED:
         logging.warning('PyFaaS was not previously configured by calling pyfaas_config()')
@@ -395,3 +420,55 @@ def _is_function_set_registered(func_set: list[str]) -> bool:
     else:
         logging.error(f'Error while checking function set registration: {message}')
         raise PyFaaSFunctionSetRegistrationCheckError(message)
+
+# Validates the workflow structurally. Contents checks will then be performed worker-side
+# This just tells of the structure of the workflow is correct (the content of the fields can be wrong here)
+# Expected structure:
+# {
+#     "entry_function": "add",
+#     "functions": {
+#         "add": {
+#             "args": [5, 10],
+#             "kwargs": {
+#                 "c": 26
+#             },
+#             "next": "multiply"
+#         },
+#         "multiply": {
+#             "args": ["$add.output", 10],
+#             "kwargs": {},
+#             "next": ""
+#         }
+#     }
+# }
+def _validate_json_workflow_structure(workflow: dict[str, dict[str, object]]) -> None:
+    if workflow == {}:
+        raise PyFaaSWorkflowValidationError('Empty workflow')
+    
+    if not workflow.get('entry_function'):
+        raise PyFaaSWorkflowValidationError('Missing or empty field "entry_function"')
+
+    # Parsing 'functions' JSON dict
+    if not workflow.get('functions'):
+        raise PyFaaSWorkflowValidationError('Missing or empty object "functions"')
+    
+    functions = workflow.get('functions')
+    allowed_function_fields = ['args', 'kwargs', 'next']
+    for func_name, func_data in functions.items():
+        if not func_name:
+            raise PyFaaSWorkflowValidationError('Empty function name')
+        
+        if not isinstance(func_data, dict):         # Check if function is a valid dict
+            raise PyFaaSWorkflowValidationError(f'"{func_name}" must be an object')
+        
+        if 'args' not in func_data:
+            raise PyFaaSWorkflowValidationError(f'Missing field "args" for object "{func_name}"')
+        if 'kwargs' not in func_data:
+            raise PyFaaSWorkflowValidationError(f'Missing field "kwargs" for object "{func_name}"')
+        if 'next' not in func_data:
+            raise PyFaaSWorkflowValidationError(f'Missing field "next" for object "{func_name}"')
+
+        for field in func_data.keys():
+            if field not in allowed_function_fields:
+                raise PyFaaSWorkflowValidationError(f'Unknown field "{field}" in object "{func_name}"')
+            
