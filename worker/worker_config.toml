@@ -10,7 +10,7 @@ shutdown_persistence = false
 
 [behavior.caching]
 policy = "LRU"
-max_size = 1
+max_size = 0
 
 [logging]
 log_level = "debug"

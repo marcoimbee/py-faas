@@ -1,4 +1,4 @@
-import util
+import util.general as general
 import socket
 import logging
 import dill
@@ -10,8 +10,10 @@ import platform
 import os
 import inspect
 
-from file_logger import FileLogger
-from func_cache import WorkerFunctionExecutionCache
+from util.file_logger import FileLogger
+from worker_caching.func_cache import WorkerFunctionExecutionCache
+from util.worker_side_workflow_validation import *
+from exceptions import *
 
 logging.basicConfig(
     format='[WORKER, %(levelname)s]    %(message)s',
@@ -129,8 +131,8 @@ class PyfaasWorker:
                             case 'get_cache_dump':
                                 self._execute_get_cache_dump_cmd(conn)
 
-                            case 'check_funciton_set_registration':
-                                self._execute_check_function_set_registration_cmd(conn, json_payload)
+                            case 'chain_exec':
+                                self._execute_chain_exec_cmd(conn, json_payload)
 
                             case 'kill':
                                 self._execute_kill_cmd()
@@ -146,21 +148,6 @@ class PyfaasWorker:
             # Fallback
             self.cleanup()
             logging.info('Goodbye')
-
-    def _execute_check_function_set_registration_cmd(self, conn, json_payload):
-        func_set = json_payload['func_set']
-        try:
-            all_registered = True
-            for func in func_set:
-                if func not in self._functions:
-                    all_registered = False
-                    break
-            
-            client_json_response = self._build_JSON_response('ok', None, 'json', all_registered, None)
-            self._send_msg(conn, client_json_response)
-        except Exception as e:
-            client_json_response = self._build_JSON_response('err', None, 'json', None, f'{e}')
-            self._send_msg(conn, client_json_response)
 
     def _execute_get_cache_dump_cmd(self, conn):
         cache_dump = self._function_exec_cache.get_cache_dump()
@@ -247,8 +234,8 @@ class PyfaasWorker:
 
     def _execute_exec_cmd(self, conn, json_payload, client_addr):
         func_name = json_payload['func_name']
-        func_args = json_payload.get('args', [])                # Default empty list
-        func_kwargs = json_payload.get('kwargs', {})            # Default empty dict
+        func_positional_args = json_payload.get('positional_args', [])        # Default empty list
+        func_default_args = json_payload.get('default_args', {})              # Default empty dict
         save_in_cache = json_payload.get('save_in_cache', False)  # Default to False if something weird has been specified client-side
 
         if func_name not in self._functions:
@@ -257,62 +244,12 @@ class PyfaasWorker:
             self._send_msg(conn, client_json_response)
         else:
             try:
-                logging.info(f'Executing the following call: {func_name}({func_args}, {func_kwargs})')
-
-                client_function = self._functions[func_name]
-
-                # Checking for cached result
-                func_res_already_in_cache = self._function_exec_cache.check_cached(
-                    func_name,
-                    func_args,
-                    func_kwargs
+                func_res = self._execute_function(
+                    func_name=func_name,
+                    func_positional_args=func_positional_args,
+                    func_default_args=func_default_args,
+                    save_in_cache=save_in_cache
                 )
-                if func_res_already_in_cache:
-                    # Result is in cache: get it
-                    try:
-                        func_res = self._function_exec_cache.get_cached_result(
-                            func_name,
-                            func_args,
-                            func_kwargs
-                        )
-                        logging.info(f'Got cached result: {func_res}')
-                        self._file_logger.log('INFO', 'Cache hit')
-                    except Exception as e:
-                        logging.error(f'Exception while fetching result from cache: {e}')
-                        self._file_logger.log('ERROR', f'Cache error: {e}')
-                        raise Exception(e)
-                else:
-                    # Result is NOT in cache
-
-                    # --- FUNCTION EXECUTION ON WORKER ---
-                    start_time = time.time()
-                    func_res = client_function(*func_args, **func_kwargs)
-                    end_time = time.time()
-                    # ------------------------------------
-
-                    exec_time = end_time - start_time
-                    if self._config['statistics']['enabled']:       
-                        self._record_stats(func_name, exec_time)   # If the result is in cache, stats are not recorded for the call
-                    else:
-                        logging.info('Statistics have not been enabled')
-
-                    # Add to cache if the user wants to
-                    if save_in_cache:
-                        try:
-                            self._function_exec_cache.add(func_name, func_args, func_kwargs, func_res)
-                            logging.info(f"Result for latest '{func_name}' call has been saved to worker cache")
-                            self._file_logger.log('INFO', f"Cache update: result for latest '{func_name}' call saved to cache")
-                        except Exception as e:
-                            # This should never happen because we already checked that the
-                            # result is NOT in cache. 
-                            # However, we check for it 
-                            logging.error(f'Exception while adding result to cache: {e}')
-                            raise Exception(e)
-
-                    logging.info(f"Executed '{func_name}' for {client_addr[0]}:{client_addr[1]} in {exec_time} s")
-                    logging.debug(f'Function result: {func_res}')
-
-                    self._file_logger.log('INFO', f'Executed {func_name}({func_args}, {func_kwargs}) in {exec_time}')
 
                 encoded_func_res, func_res_type = self._encode_func_result(func_res)          # JSON or base64
                 client_json_response = self._build_JSON_response('ok', 'executed', func_res_type, encoded_func_res, None)
@@ -322,6 +259,116 @@ class PyfaasWorker:
                 client_json_response = self._build_JSON_response('err', None, 'json', None, f'{type(e).__name__}: {e}')
                 self._send_msg(conn, client_json_response)
 
+    def _execute_chain_exec_cmd(self, conn, json_payload):
+        workflow = json_payload['json_workflow']
+
+        workflow_id = workflow.get('id')
+        workflow_function_set = workflow.get('functions')
+        
+        # Check if all the listed functions are registered
+        function_names = [func_name for func_name, _ in workflow_function_set.items()]
+        all_funcs_registered, missing_func_name = self._check_function_set_registration(function_names)
+        if not all_funcs_registered:
+            logging.error(f"No function named '{missing_func_name}' specified in the workflow is registered right now")
+            client_json_response = self._build_JSON_response('err', None, None, None, f"No function named '{missing_func_name}' specified in the workflow is registered at the worker right now")
+            self._send_msg(conn, client_json_response)
+            return
+
+        logging.info('All functions are registered')
+
+        # Worker-side function validation
+        try:
+            for func_name in function_names:        # Validating each function
+                func_code = self._functions[func_name]   # Here function is registered for sure
+                func_positional_args = workflow_function_set[func_name]['positional_args']
+                func_default_args = workflow_function_set[func_name]['default_args']
+                
+                # Passed arguments validation
+                validate_function_args(
+                    func_code, 
+                    func_positional_args, 
+                    func_default_args
+                )
+                
+                # Referenced arguments validation
+                next_func_in_chain = workflow_function_set[func_name]['next']    # Get function that receives input from this function
+                if next_func_in_chain != '':        # If not the final function in chain
+                    next_func_in_chain_code = self._functions[next_func_in_chain]
+                    next_func_in_chain_positional_args = workflow_function_set[next_func_in_chain]['positional_args']
+                    next_func_in_chain_default_args = workflow_function_set[next_func_in_chain]['default_args']
+                    validate_return_type_references(        # Provide function i and (i+1) in chain data
+                        func_code, 
+                        next_func_in_chain_code,
+                        next_func_in_chain_positional_args,
+                        next_func_in_chain_default_args
+                    )
+        except WorkerWorkflowValidationError as e:
+            logging.error(f"Error while validating workflow: {e}")
+            client_json_response = self._build_JSON_response('err', None, None, None, f"Error while validating workflow {workflow_id}: {e}")
+            self._send_msg(conn, client_json_response)
+            return
+
+        # Functions have been validated, are OK, and can be chained
+        try:
+            # Executing entry function
+            entry_func_name = workflow.get('entry_function')
+            entry_func_positional_args = workflow_function_set[entry_func_name]['positional_args']
+            entry_func_default_args = workflow_function_set[entry_func_name]['default_args']
+            save_in_cache = workflow_function_set[entry_func_name]['cache_result']
+
+            entry_func_res = self._execute_function(
+                func_name=entry_func_name,
+                func_positional_args=entry_func_positional_args,
+                func_default_args=entry_func_default_args,
+                save_in_cache=save_in_cache
+            )
+
+            next_func = workflow_function_set[entry_func_name]['next']
+            function_names.remove(entry_func_name)
+            
+            # Executing the following functions in the workflow
+            prev_func_name = entry_func_name
+            prev_func_result = entry_func_res
+            while True:
+                func_name = next_func
+                save_in_cache = workflow_function_set[func_name]['cache_result']
+                
+                # Replacing references with results of the previous function
+                func_positional_args = workflow_function_set[func_name]['positional_args']
+                func_default_args = workflow_function_set[func_name]['default_args']
+                for i in range(len(func_positional_args)):
+                    if func_positional_args[i] == f'${prev_func_name}.output':
+                        func_positional_args[i] = prev_func_result
+                for def_arg_name, def_arg_value in func_default_args.items():
+                    if def_arg_value == f'${prev_func_name}.output':
+                        func_default_args[def_arg_name] = prev_func_result
+                
+                func_res = self._execute_function(
+                    func_name=func_name,
+                    func_positional_args=func_positional_args,
+                    func_default_args=func_default_args,
+                    save_in_cache=save_in_cache
+                )
+
+                # Updating cycle vars
+                next_func = workflow_function_set[func_name]['next']
+                function_names.remove(func_name)
+                if next_func == '':
+                    # End of workflow, executed last function, can break out of while
+                    break
+                prev_func_name = func_name
+                prev_func_result = func_res
+
+            encoded_func_res, func_res_type = self._encode_func_result(func_res)          # JSON or base64
+            client_json_response = self._build_JSON_response('ok', 'chain_executed', func_res_type, encoded_func_res, None)
+
+            self._send_msg(conn, client_json_response)
+
+        except WorkerChainedExecutionError as e:
+            logging.error(f"Error while executing workflow '{workflow_id}': {e}")
+            client_json_response = self._build_JSON_response('err', None, None, None, f"Error while executing workflow '{workflow_id}': {e}")
+            self._send_msg(conn, client_json_response)
+        
     def _execute_unregister_cmd(self, conn, json_payload):
         func_name = json_payload['func_name']
         client_json_response = None
@@ -336,8 +383,8 @@ class PyfaasWorker:
             logging.info(f"No function named '{func_name}' is registered right now")
             client_json_response = self._build_JSON_response('err', 'no_func', None, None, f"No function named '{func_name}' is registered at the worker right now")
 
-        logging.debug('Currently registered functions:')
-        logging.debug(f'\t {self._functions}')
+        # logging.debug('Currently registered functions:')
+        # logging.debug(f'\t {self._functions}')
 
         self._send_msg(conn, client_json_response)
 
@@ -347,10 +394,26 @@ class PyfaasWorker:
         client_function = dill.loads(serialized_func_bytes)
         func_name = client_function.__name__
 
-        func_params = inspect.signature(client_function)
-        logging.debug(f'Params: {func_params}')
-
         client_json_response = None
+
+        func_signature = inspect.signature(client_function)
+
+        # Checking that client has specified type annotations for parameters
+        for name, param in func_signature.parameters.items():
+            if param.annotation is inspect._empty:
+                logging.debug(f"Unspecified type annotation for parameter '{name}' of function '{func_name}'")
+                client_json_response = self._build_JSON_response('err', None, None, None, f"Unspecified type annotation for parameter '{name}' of function '{func_name}'")
+                self._send_msg(conn, client_json_response)
+                return
+        
+        # Checking if the client has specified type annotation for the return type
+        if func_signature.return_annotation is inspect._empty:
+            logging.debug(f"Unspecified return annotation of function '{func_name}'")
+            client_json_response = self._build_JSON_response('err', None, None, None, f"Unspecified return annotation of function '{func_name}'")
+            self._send_msg(conn, client_json_response)
+            return
+
+        # Function has been validated and is register-able at this point
         if func_name not in self._functions:
             self._functions[func_name] = client_function
             logging.info(f'Function {func_name} successfully registered')
@@ -367,11 +430,68 @@ class PyfaasWorker:
                 logging.warning(f"A function named '{func_name}' is already registered")
                 logging.warning(f"Function '{func_name}' will not be overridden")
                 client_json_response = self._build_JSON_response('ok', 'no_action', None, None, None)
-        
-        logging.debug('Currently registered functions:')
-        logging.debug(f'\t {self._functions}')
 
         self._send_msg(conn, client_json_response)
+
+    def _execute_function(self, func_name, func_positional_args, func_default_args, save_in_cache):
+        logging.info(f'Executing the following call: {func_name}({func_positional_args}, {func_default_args})')
+        try:
+            client_function = self._functions[func_name]
+
+            # Checking for cached result
+            func_res_already_in_cache = self._function_exec_cache.check_cached(
+                func_name,
+                func_positional_args,
+                func_default_args
+            )
+            if func_res_already_in_cache:
+                # Result is in cache: get it
+                try:
+                    func_res = self._function_exec_cache.get_cached_result(
+                        func_name,
+                        func_positional_args,
+                        func_default_args
+                    )
+                    logging.info(f"Got cached result: '{func_res}' for '{func_name}'")
+                    self._file_logger.log('INFO', 'Cache hit')
+                except WorkerFunctionCacheError as e:
+                    logging.error(f'Exception while fetching result from cache: {e}')
+                    self._file_logger.log('ERROR', f'Cache error: {e}')
+                    raise Exception(e)
+            else:
+                # Result is NOT in cache
+                # --- FUNCTION EXECUTION ON WORKER ---
+                start_time = time.time()
+                func_res = client_function(*func_positional_args, **func_default_args)
+                end_time = time.time()
+                # ------------------------------------
+
+                exec_time = end_time - start_time
+                if self._config['statistics']['enabled']:       
+                    self._record_stats(func_name, exec_time)   # If the result is in cache, stats are not recorded for the call
+                else:
+                    logging.info('Statistics have not been enabled')
+
+                # Add to cache if the user wants to
+                if save_in_cache:
+                    try:
+                        self._function_exec_cache.add(func_name, func_positional_args, func_default_args, func_res)
+                        logging.info(f"Result for latest '{func_name}' call has been saved to worker cache")
+                        self._file_logger.log('INFO', f"Cache update: result for latest '{func_name}' call saved to cache")
+                    except WorkerFunctionCacheError as e:
+                        # This should never happen because we already checked that the
+                        # result is NOT in cache. 
+                        # However, we check for it 
+                        logging.error(f'Exception while adding result to cache: {e}')
+                        raise Exception(e)
+
+                logging.info(f"Executed '{func_name}' in {exec_time} s. Result: '{func_res}'")
+                self._file_logger.log('INFO', f'Executed {func_name}({func_positional_args}, {func_default_args}) in {exec_time}')
+
+                return func_res
+        except Exception as e:
+            logging.error(f"Error while executing function '{func_name}': {e}")
+            raise WorkerFunctionExecutionError(e)
 
     def _dump_worker_state(self) -> None:
         dump = {
@@ -404,7 +524,6 @@ class PyfaasWorker:
             avg_exec_time = self._stats[func_name]['tot_exec_time'] / self._stats[func_name]['#calls']
             self._stats[func_name]['avg_exec_time'] = avg_exec_time
             
-
     def _build_JSON_response(self, status: str, action: str, result_type: str, result: object, message: str) -> bytes:
         return {
             'status': status,
@@ -412,7 +531,13 @@ class PyfaasWorker:
             'result_type': result_type,
             'result': result,
             'message': message
-        } 
+        }
+
+    def _check_function_set_registration(self, function_set: list[str]) -> tuple[bool, str | None]:
+        for func in function_set:
+            if func not in self._functions:
+                return False, func
+        return True, None
 
     def _encode_func_result(self, func_result: object) -> tuple[str, str]:
         try:
@@ -454,12 +579,12 @@ class PyfaasWorker:
 
 def main():
     try:
-        config = util.read_config_toml(_TOML_CONFIG_FILE)
+        config = general.read_config_toml(_TOML_CONFIG_FILE)
     except Exception as e:
         logging.error(e)
         exit(0)
 
-    util.setup_logging(config['logging']['log_level'])
+    general.setup_logging(config['logging']['log_level'])
 
     worker = PyfaasWorker(config)
     try:

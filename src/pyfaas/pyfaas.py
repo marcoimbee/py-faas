@@ -7,7 +7,7 @@ import time
 from typing import Callable
 
 from .util.general import *
-from .util.workflow_validation import *
+from .util.client_side_workflow_validation import *
 from .exceptions import *
 
 
@@ -218,7 +218,7 @@ def pyfaas_list() -> list[str]:
         logging.warning(f'Error while listing functions on the worker: {message}')
         raise PyFaaSFunctionListingError(message)
 
-def pyfaas_exec(func_name: str, func_arglist: list[object], func_kwargslist: dict[str, object] = None, save_in_cache: bool = False) -> object:
+def pyfaas_exec(func_name: str, func_positional_args_list: list[object], func_default_args_list: dict[str, object] = None, save_in_cache: bool = False) -> object:
     if not _PYFAAS_CONFIGURED:
         logging.warning('PyFaaS was not previously configured by calling pyfaas_config()')
         pyfaas_config()
@@ -227,20 +227,20 @@ def pyfaas_exec(func_name: str, func_arglist: list[object], func_kwargslist: dic
 
     cmd = 'exec'
 
-    if type(func_arglist) != list:
-        logging.error(f"Parameters mismatch: func_arglist must be of type 'list[object]', while {type(func_arglist)} was provided")
-        raise Exception(f"Parameters mismatch: func_arglist must be of type 'list[object]', while {type(func_arglist)} was provided")
+    if type(func_positional_args_list) != list:
+        logging.error(f"Parameters mismatch: func_arglist must be of type 'list[object]', while {type(func_positional_args_list)} was provided")
+        raise Exception(f"Parameters mismatch: func_arglist must be of type 'list[object]', while {type(func_positional_args_list)} was provided")
     
-    if func_kwargslist is None:
-        func_kwargslist = {}
+    if func_default_args_list is None:
+        func_default_args_list = {}
 
-    logging.debug(f'Called faas_exec. Args: {func_name, func_arglist, func_kwargslist}, save_in_cache={save_in_cache}')
+    logging.debug(f'Called faas_exec. Args: {func_name, func_positional_args_list, func_default_args_list}, save_in_cache={save_in_cache}')
 
     json_payload = {                 # To be sent to server
         'cmd': cmd,
         'func_name': func_name,
-        'args': func_arglist,
-        'kwargs': func_kwargslist,
+        'positional_args': func_positional_args_list,
+        'default_args': func_default_args_list,
         'save_in_cache': save_in_cache,
         'additional_data': None
     }
@@ -335,8 +335,12 @@ def pyfaas_load_workflow(workflow_file_path: str) -> dict[str, dict[str, object]
         logging.error(f'Error while loading the workflow: {e}')
 
 def pyfaas_chain_exec(json_workflow: dict[str, dict[str, object]]):
-    # No need to call pyfaas_config(), as functions need to be registered first
-    # and pyfaas_register() calls pyfaas_config() itself if the user didn't before
+    if not _PYFAAS_CONFIGURED:
+        logging.warning('PyFaaS was not previously configured by calling pyfaas_config()')
+        pyfaas_config()
+
+    global _CLIENT_SOCKET
+    
     try:
         logging.debug('Validating workflow...')
         validate_json_workflow_structure(json_workflow)
@@ -346,8 +350,30 @@ def pyfaas_chain_exec(json_workflow: dict[str, dict[str, object]]):
     
     # If here, workflow is STRUCTURALLY valid, and can be passed to the worker
     logging.info(f'Provided workwlow is structurally valid')
-    pass
+    
+    cmd = 'chain_exec'
+    json_payload = {
+        'cmd': cmd,
+        'json_workflow': json_workflow
+    }
 
+    # Send to worker through socket
+    _send_msg(_CLIENT_SOCKET, json_payload)
+
+    # Get worker payload
+    worker_resp_json = _recv_msg(_CLIENT_SOCKET)
+
+    status = worker_resp_json.get('status')
+    result = worker_resp_json.get('result')
+    message = worker_resp_json.get('message')
+
+    workflow_id = json_workflow.get('id')
+
+    if status == 'ok':
+        logging.info(f"Chain execution completed. Yielded: '{result}'")
+        return result
+    else:
+        logging.error(f"Error while chain-executing workflow '{workflow_id}': {message}")
 
 def pyfaas_ping() -> None:
     if not _PYFAAS_CONFIGURED:
@@ -395,30 +421,3 @@ def _recv_msg(socket: socket.socket) -> dict:
         data += pkt
     
     return json.loads(data.decode())
-
-def _is_function_set_registered(func_set: list[str]) -> bool:
-    global _CLIENT_SOCKET
-
-    cmd = 'check_funciton_set_registration'
-    json_payload = {
-        'cmd': cmd,
-        'func_set': func_set
-    }
-    
-    # Send to worker through socket
-    _send_msg(_CLIENT_SOCKET, json_payload)
-    
-    # Get worker payload
-    worker_resp_json = _recv_msg(_CLIENT_SOCKET)
-
-    status = worker_resp_json.get('status')
-    result = worker_resp_json.get('result')
-    message = worker_resp_json.get('message')
-
-    if status == 'ok':
-        # True if every function in func_set is registered at the worker
-        # False otherwise
-        return result
-    else:
-        logging.error(f'Error while checking function set registration: {message}')
-        raise PyFaaSFunctionSetRegistrationCheckError(message)
