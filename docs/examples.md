@@ -94,7 +94,7 @@ except PyFaaSFunctionExecutionError as e:
 Caching policy and maximum capcity can be configured via the worker's TOML configuration file.
 
 ## Chained function execution
-For learning how to use the provided `pyfaas_chain_exec` function, refer to [this](chain_exec_guide.md) guide.
+To understand how to use the provided `pyfaas_chain_exec` function, refer to [this](chain_exec_guide.md) guide.
 
 ## Function list
 Retrieves information about the currently recorded function at the worker's:
