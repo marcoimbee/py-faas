@@ -67,6 +67,18 @@ Each function object requires the following fields:
 - `next`: the next function in the chain. This field must be left empty if the function is the final one in the chain.
 - `cache_result`: a boolean telling PyFaaS' worker whether to cache the result of the function execution or not. 
 
+### Workflow template creation tool
+A workflow template can be created with the specified number of functions in the chain by using the provided `tools/create_workflow.py` tool:
+```bash
+cd pyfaas/tools
+python create_workflow.py -n my_workflow.json -p . -f 5
+```
+Creates a `workflow_template.json` file with a workflow skeleton, where:
+- `-n`: name of the workflow (default to `workflow_template.json`)
+- `-p`: destination path (default to `pyfaas/tools`)
+- `-f`: number of functions in the chain
+
+
 ## API
 To enable chained execution of functions, two functions can be used:
 - `pyfaas_load_workflow`
