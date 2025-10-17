@@ -59,7 +59,6 @@ class WorkerFunctionExecutionCache():
 
             self._cache_nodes_hmap[key_tuple] = new_cached_result
 
-
     def get_cached_result(self, func_name: str, func_positional_args: list[object], func_default_args: dict[object]) -> object:
         if self._max_size == 0:
             # Caching is disabled

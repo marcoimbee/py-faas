@@ -15,6 +15,7 @@ from worker_caching.func_cache import WorkerFunctionExecutionCache
 from util.worker_side_workflow_validation import *
 from exceptions import *
 
+
 logging.basicConfig(
     format='[WORKER, %(levelname)s]    %(message)s',
     level=logging.ERROR,   # default until config is loaded
@@ -149,7 +150,7 @@ class PyfaasWorker:
             self.cleanup()
             logging.info('Goodbye')
 
-    def _execute_get_cache_dump_cmd(self, conn):
+    def _execute_get_cache_dump_cmd(self, conn: socket.socket) -> None:
         cache_dump = self._function_exec_cache.get_cache_dump()
         client_json_response = self._build_JSON_response('ok', None, 'json', cache_dump, None)
         self._send_msg(conn, client_json_response)
@@ -159,12 +160,12 @@ class PyfaasWorker:
         self._file_logger.log('INFO', f'Worker killed by client')
         self.cleanup()
 
-    def _execute_ping_cmd(self, conn, cmd):
+    def _execute_ping_cmd(self, conn: socket.socket, cmd: str) -> None:
         logging.info(f"Client says: '{cmd}'")
         client_json_response = self._build_JSON_response('ok', None, 'json', 'PONG', None)
         self._send_msg(conn, client_json_response)
 
-    def _execute_get_worker_info_cmd(self, conn):
+    def _execute_get_worker_info_cmd(self, conn: socket.socket) -> None:
         try:
             info_summary = {}
 
@@ -203,7 +204,7 @@ class PyfaasWorker:
             client_json_response = self._build_JSON_response('err', None, 'json', None, f'{e}')
             self._send_msg(conn, client_json_response)
 
-    def _execute_get_stats_cmd(self, conn, json_payload):
+    def _execute_get_stats_cmd(self, conn: socket.socket, json_payload: dict) -> None:
         try:
             func_name = json_payload['func_name']
             if func_name != None:
@@ -220,7 +221,7 @@ class PyfaasWorker:
             client_json_response = self._build_JSON_response('err', None, 'json', None, f'{e}')
             self._send_msg(conn, client_json_response)
 
-    def _execute_list_cmd(self, conn):
+    def _execute_list_cmd(self, conn: socket.socket) -> None:
         try:
             func_list = [f for f, _ in self._functions.items()]
             logging.info(f'List: retrieved {len(func_list)} functions')
@@ -232,7 +233,7 @@ class PyfaasWorker:
             client_json_response = self._build_JSON_response('err', None, 'json', None, f'{type(e).__name__}: {e}')
             self._send_msg(conn, client_json_response)
 
-    def _execute_exec_cmd(self, conn, json_payload, client_addr):
+    def _execute_exec_cmd(self, conn: socket.socket, json_payload: dict) -> None:
         func_name = json_payload['func_name']
         func_positional_args = json_payload.get('positional_args', [])        # Default empty list
         func_default_args = json_payload.get('default_args', {})              # Default empty dict
@@ -259,7 +260,7 @@ class PyfaasWorker:
                 client_json_response = self._build_JSON_response('err', None, 'json', None, f'{type(e).__name__}: {e}')
                 self._send_msg(conn, client_json_response)
 
-    def _execute_chain_exec_cmd(self, conn, json_payload):
+    def _execute_chain_exec_cmd(self, conn: socket.socket, json_payload: dict) -> None:
         workflow = json_payload['json_workflow']
 
         workflow_id = workflow.get('id')
@@ -369,7 +370,7 @@ class PyfaasWorker:
             client_json_response = self._build_JSON_response('err', None, None, None, f"Error while executing workflow '{workflow_id}': {e}")
             self._send_msg(conn, client_json_response)
         
-    def _execute_unregister_cmd(self, conn, json_payload):
+    def _execute_unregister_cmd(self, conn: socket.socket, json_payload: dict) -> None:
         func_name = json_payload['func_name']
         client_json_response = None
         if func_name in self._functions:
@@ -388,7 +389,7 @@ class PyfaasWorker:
 
         self._send_msg(conn, client_json_response)
 
-    def _execute_register_cmd(self, conn, json_payload):
+    def _execute_register_cmd(self, conn: socket.socket, json_payload: dict) -> None:
         serialized_func_base64 = json_payload['serialized_func_base64']
         serialized_func_bytes = base64.b64decode(serialized_func_base64)
         client_function = dill.loads(serialized_func_bytes)
@@ -433,7 +434,7 @@ class PyfaasWorker:
 
         self._send_msg(conn, client_json_response)
 
-    def _execute_function(self, func_name, func_positional_args, func_default_args, save_in_cache):
+    def _execute_function(self, func_name: str, func_positional_args: list, func_default_args: dict, save_in_cache: bool) -> None:
         logging.info(f'Executing the following call: {func_name}({func_positional_args}, {func_default_args})')
         try:
             client_function = self._functions[func_name]
@@ -566,7 +567,7 @@ class PyfaasWorker:
             data += pkt
         return json.loads(data.decode())
     
-    def cleanup(self):
+    def cleanup(self) -> None:
         # Dump worker state to file only if enabled and if there has been at least a call (there is something to save)
         if self._config['behavior']['shutdown_persistence'] and self._request_count != 0:
             try:

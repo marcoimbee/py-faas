@@ -3,7 +3,6 @@ import logging
 import socket
 
 
-# TODO: define custom exception classes
 def read_config_toml(path: str) -> dict:
     with open(path, mode='rb') as fp:
         config = tomli.load(fp)
@@ -27,7 +26,6 @@ def read_config_toml(path: str) -> dict:
 
     return config
 
-    
 def setup_logging(log_level: str) -> None:
     match log_level:
         case 'info':
