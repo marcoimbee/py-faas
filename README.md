@@ -64,7 +64,7 @@ enabled = true
 
 [logging]
 log_level = "info"
-log_directory = "worker/logs"
+log_directory = "pyfaas_worker/logs"
 log_filename = "worker_log.log"
 
 [behavior]
