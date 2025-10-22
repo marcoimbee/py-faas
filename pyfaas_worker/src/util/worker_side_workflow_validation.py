@@ -35,21 +35,6 @@ def _debug_print_args(registered_func_positional_args, registered_func_default_a
     pprint('Provided positional args: ', provided_positional_args)
     pprint('Provided default args: ', provided_default_args)
 
-def validate_function_args(func_code, provided_positional_args, provided_default_args):
-    # Getting pre-registered function data
-    func_name = func_code.__name__
-    registered_func_signature = inspect.signature(func_code)
-    registered_func_positional_args = _get_registered_positional_args(registered_func_signature)
-    registered_func_default_args = _get_registered_default_args(registered_func_signature)
-
-    # _debug_print_args(registered_func_positional_args, registered_func_default_args, provided_positional_args, provided_default_args)
-
-    # Checking positional args
-    _validate_positional_args(provided_positional_args, registered_func_positional_args, func_name)
-    
-    # Checking default args
-    _validate_default_args(provided_default_args, registered_func_default_args, func_name)
-
 def _get_registered_positional_args(func_signature):
     return [        # Getting positional arguments name and typing
         [name, param.annotation]                    # [name, type]
@@ -63,6 +48,31 @@ def _get_registered_default_args(func_signature):
         for name, param in func_signature.parameters.items()
         if param.default is not inspect._empty  # Filtering out positional args
     ]
+
+def validate_function_args(func_code, provided_positional_args, provided_default_args):
+    # Getting pre-registered function data
+    func_name = func_code.__name__
+    registered_func_signature = inspect.signature(func_code)
+    registered_func_positional_args = _get_registered_positional_args(registered_func_signature)
+    registered_func_default_args = _get_registered_default_args(registered_func_signature)
+
+    # _debug_print_args(registered_func_positional_args, registered_func_default_args, provided_positional_args, provided_default_args)
+
+    # Checking number of provided args against number of registered args
+    _check_args_length(provided_positional_args, provided_default_args, registered_func_positional_args, registered_func_default_args, func_name)
+
+    # Checking positional args
+    _validate_positional_args(provided_positional_args, registered_func_positional_args, func_name)
+    
+    # Checking default args
+    _validate_default_args(provided_default_args, registered_func_default_args, func_name)
+
+def _check_args_length(provided_positional_args, provided_default_args, registered_func_positional_args, registered_func_default_args, func_name):
+    tot_accepted_args = len(registered_func_positional_args) + len(registered_func_default_args)
+    tot_provided_args = len(provided_positional_args) + len(provided_default_args)
+    if tot_provided_args > tot_accepted_args:
+        err_msg = f"Function '{func_name}' accepts at most {tot_accepted_args} parameters, while {tot_provided_args} were provided"
+        raise WorkerWorkflowValidationError(err_msg)
 
 def validate_return_type_references(func_code, next_func_code, next_func_provided_positional_args, next_func_provided_default_args):
     # - Is return type of function A compliant with arg of function B, of function B has receives result from function A as input?
