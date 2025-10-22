@@ -305,7 +305,7 @@ class PyfaasWorker:
                     )
         except WorkerWorkflowValidationError as e:
             logging.error(f"Error while validating workflow: {e}")
-            client_json_response = self._build_JSON_response('err', None, None, None, f"Error while validating workflow {workflow_id}: {e}")
+            client_json_response = self._build_JSON_response('err', None, None, None, f"Error while validating workflow '{workflow_id}': {e}")
             self._send_msg(conn, client_json_response)
             return
 
