@@ -4,7 +4,6 @@ from exceptions import WorkerWorkflowValidationError
 
 # TODO: MISSING CHECKS:
 # I am comparing exact types, but what about subclasses, typing.Union, Optional, Any, etc. ?
-# None or empty value for a required arg
 
 
 # Tells, for each type, the types it can be promoted to
@@ -49,18 +48,14 @@ def validate_function_args(func_code, provided_positional_args, provided_default
     registered_func_signature = inspect.signature(func_code)
     registered_positional_args = _get_registered_positional_args(registered_func_signature)
     registered_default_args = _get_registered_default_args(registered_func_signature)
-
     _debug_print_args(registered_positional_args, registered_default_args, provided_positional_args, provided_default_args)
 
     # Checking number of provided args against number of registered args
     _check_args_length(provided_positional_args, provided_default_args, registered_positional_args, registered_default_args, func_name)
-
     # Checking possible arg duplicates
     _check_args_duplicates(provided_positional_args, provided_default_args, registered_positional_args, registered_default_args, func_name)
-
     # Checking positional args
     _validate_positional_args(provided_positional_args, registered_positional_args, func_name)
-    
     # Checking default args
     _validate_default_args(provided_default_args, registered_default_args, func_name)
 
@@ -143,17 +138,20 @@ def _validate_positional_args(provided_positional_args, registered_positional_ar
     if len(provided_positional_args) != len(registered_positional_args):
         raise WorkerWorkflowValidationError(f"Function '{func_name} accepts {len(registered_positional_args)}' positional arguments, while {len(provided_positional_args)} were provided")
     # - Are types compliant? (Do the specified positional args types match the registered ones?)
-    # - Check for possible type promotion
     # - Skip checking positional args that match '$func_name.output' (otherwise always seen as str here)
+    # - Check for None or missing value for required argument
+    # - Check for possible type promotion
     for i in range(len(registered_positional_args)):
         registered_arg_name = registered_positional_args[i][0]
         registered_arg_type = registered_positional_args[i][1]
+        if _is_referenced_arg(provided_positional_args[i]):
+            continue
+        if provided_positional_args[i] is None:
+            raise WorkerWorkflowValidationError(f"Positional argument '{registered_arg_name}' of function '{func_name}' cannot be None")
         if registered_arg_type.__name__ in _type_coercion_table:        # Getting exact type name of registered arg from table
             allowed_types = _type_coercion_table.get(registered_arg_type.__name__)      # Getting the associated allowed types
             if type(provided_positional_args[i]).__name__ in allowed_types:     # If provided arg type is in allowed types, skip
                 continue
-        if _is_referenced_arg(provided_positional_args[i]):
-            continue
         if registered_arg_type != type(provided_positional_args[i]):
             raise WorkerWorkflowValidationError(f"Positional argument '{registered_arg_name}' of function '{func_name}' is of type {registered_arg_type}, while {type(provided_positional_args[i])} was provided")
 
@@ -174,11 +172,11 @@ def _validate_default_args(provided_default_args, registered_default_args, func_
         registered_arg_name = registered_default_args[i][0]
         registered_arg_type = registered_default_args[i][1]
         for provided_default_arg_name, provided_default_arg_value in provided_default_args.items():
+            if _is_referenced_arg(provided_default_arg_value):
+                continue
             if registered_arg_type.__name__ in _type_coercion_table:    # Getting exact type name of registered arg from table
                 allowed_types = _type_coercion_table.get(registered_arg_type.__name__)      # Getting the associated allowed types
                 if type(provided_default_arg_value).__name__ in allowed_types:  # If provided arg type is in allowed types, skip
                     continue
-            if _is_referenced_arg(provided_default_arg_value):
-                continue
             if registered_arg_name == provided_default_arg_name and registered_arg_type != type(provided_default_arg_value):
                 raise WorkerWorkflowValidationError(f"Default argument '{provided_default_arg_name}' of function '{func_name}' is of type {registered_arg_type}, while {type(provided_default_arg_value)} was provided")
