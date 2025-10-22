@@ -1,9 +1,7 @@
 import inspect
 
+from typing import Any, get_origin, get_args, Union, Optional
 from exceptions import WorkerWorkflowValidationError
-
-# TODO: MISSING CHECKS:
-# I am comparing exact types, but what about subclasses, typing.Union, Optional, Any, etc. ?
 
 
 # Tells, for each type, the types it can be promoted to
@@ -48,7 +46,7 @@ def validate_function_args(func_code, provided_positional_args, provided_default
     registered_func_signature = inspect.signature(func_code)
     registered_positional_args = _get_registered_positional_args(registered_func_signature)
     registered_default_args = _get_registered_default_args(registered_func_signature)
-    _debug_print_args(registered_positional_args, registered_default_args, provided_positional_args, provided_default_args)
+    # _debug_print_args(registered_positional_args, registered_default_args, provided_positional_args, provided_default_args)
 
     # Checking number of provided args against number of registered args
     _check_args_length(provided_positional_args, provided_default_args, registered_positional_args, registered_default_args, func_name)
@@ -152,7 +150,7 @@ def _validate_positional_args(provided_positional_args, registered_positional_ar
             allowed_types = _type_coercion_table.get(registered_arg_type.__name__)      # Getting the associated allowed types
             if type(provided_positional_args[i]).__name__ in allowed_types:     # If provided arg type is in allowed types, skip
                 continue
-        if registered_arg_type != type(provided_positional_args[i]):
+        if not _is_value_of_type(provided_positional_args[i], registered_arg_type):
             raise WorkerWorkflowValidationError(f"Positional argument '{registered_arg_name}' of function '{func_name}' is of type {registered_arg_type}, while {type(provided_positional_args[i])} was provided")
 
 def _validate_default_args(provided_default_args, registered_default_args, func_name):
@@ -178,5 +176,40 @@ def _validate_default_args(provided_default_args, registered_default_args, func_
                 allowed_types = _type_coercion_table.get(registered_arg_type.__name__)      # Getting the associated allowed types
                 if type(provided_default_arg_value).__name__ in allowed_types:  # If provided arg type is in allowed types, skip
                     continue
-            if registered_arg_name == provided_default_arg_name and registered_arg_type != type(provided_default_arg_value):
+            if registered_arg_name == provided_default_arg_name and not _is_value_of_type(provided_default_arg_value, registered_arg_type):
                 raise WorkerWorkflowValidationError(f"Default argument '{provided_default_arg_name}' of function '{func_name}' is of type {registered_arg_type}, while {type(provided_default_arg_value)} was provided")
+
+# Checks if a value matches a (possibly complex) type annotation
+def _is_value_of_type(value, expected_type):
+    if expected_type is inspect._empty:
+        return True
+
+    origin = get_origin(expected_type)
+    args = get_args(expected_type)
+
+    # Case Any
+    if expected_type is Any:
+        return True
+    
+    # Case Union / Optional
+    if origin is Union:
+        return any(_is_value_of_type(value, t) for t in args)
+    
+    # Case generic container
+    if origin in (list, tuple, set):      
+        inner_type = args[0] if args else Any
+        if not isinstance(value, origin):
+            return False
+        return all(_is_value_of_type(v, inner_type) for v in value)
+    if origin is dict:
+        key_type, value_type = args if args else (Any, Any)
+        if not isinstance(value, dict):
+            return False
+        return all(_is_value_of_type(k, key_type) and _is_value_of_type(v, value_type) for k, v in value.items())
+    
+    # Case subclass / normal type
+    try:
+        return isinstance(value, expected_type)
+    except TypeError:
+        # Handles ForwardRefs or typing objects that aren't real types
+        return type(value).__name__ == str(expected_type)
