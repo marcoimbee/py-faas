@@ -8,7 +8,7 @@ def read_config_toml(path: str) -> dict:
         config = tomli.load(fp)
     
     # Checking port validity
-    if config['network']['worker_port'] == None or config['network']['worker_port'] <= 1024 or config['network']['worker_port'] >= 65535:
+    if config['network']['worker_port'] is None or config['network']['worker_port'] <= 1024 or config['network']['worker_port'] >= 65535:
         raise Exception(f'Config error: invalid port {config['network']['worker_port']}')
     
     # Checking IP addr validity

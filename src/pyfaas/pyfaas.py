@@ -157,14 +157,14 @@ def pyfaas_get_stats(func_name: str = None) -> dict:
     message = worker_resp_json.get('message')
 
     if status == 'ok':
-        if func_name != None:
+        if func_name is not None:
             logging.info(f"Retrieved stats for '{func_name}'")
         else:
             logging.info(f'Retrieved general stats')
         logging.debug(f'Stats: {json_stats}')
         return json_stats
     else:
-        if func_name != None:
+        if func_name is not None:
             logging.error(f"Error while retrieving stats for '{func_name}': {message}")
         else:
             logging.error(f'Error while retrieving general stats: {message}')

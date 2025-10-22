@@ -207,7 +207,7 @@ class PyfaasWorker:
     def _execute_get_stats_cmd(self, conn: socket.socket, json_payload: dict) -> None:
         try:
             func_name = json_payload['func_name']
-            if func_name != None:
+            if func_name is not None:
                 if func_name not in self._stats:
                     raise Exception(f"No function named '{func_name}' is registered right now")
                 else:
