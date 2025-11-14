@@ -15,15 +15,6 @@ except PyFaaSFunctionRegistrationError as e:
 ```
 <u><b>Note that to successfully register a function, all type annotations must be provided, both for parameters and return type.</u></b>
 
-If a previously registered function changes code or arguments, but not its name, can be registered at the worker's by using again `pyfaas_register`, and by specifying `override=True` as an argument. This will override the previously registered function with the same name:
-```python
-def simple_function_1(d: int) -> float:
-    return d + 0.1
-
-try:
-    pyfaas_register(simple_function_1, override=True)
-except PyFaaSFunctionRegistrationError as e:
-    print(e)
 ```
 To unregister a function:
 ```python

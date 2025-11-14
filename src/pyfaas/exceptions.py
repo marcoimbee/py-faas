@@ -33,3 +33,24 @@ class PyFaaSFunctionSetRegistrationCheckError(PyFaaSError):
 
 class PyFaaSWorkflowValidationError(PyFaaSError):
     pass
+
+class PyFaaSTimeoutError(PyFaaSError):
+    pass
+
+class PyFaaSDeserializationError(PyFaaSError):
+    pass
+
+class PyFaaSParameterMismatchError(PyFaaSError):
+    pass
+
+class PyFaaSWorkflowLoadingError(PyFaaSError):
+    pass
+
+class PyFaaSPingingError(PyFaaSError):
+    pass
+
+class PyFaaSWorkerIDsRetrievalError(PyFaaSError):
+    pass
+
+class PyFaaSChainedExecutionError(PyFaaSError):
+    pass

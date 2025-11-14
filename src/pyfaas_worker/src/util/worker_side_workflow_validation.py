@@ -1,6 +1,6 @@
 import inspect
 
-from typing import Any, get_origin, get_args, Union, Optional
+from typing import Any, get_origin, get_args, Union
 from exceptions import WorkerWorkflowValidationError
 
 
@@ -10,13 +10,13 @@ from exceptions import WorkerWorkflowValidationError
 # implicitly casted to 'float'
 _type_coercion_table = {
     # Numeric types
-    'bool': ['int', 'float', 'complex'],
-    'int': ['bool', 'float', 'complex'],
-    'float': ['bool', 'int', 'complex'],
-    'complex': ['bool', 'int', 'float'],
+    'bool':     ['int',  'float', 'complex'],
+    'int':      ['bool', 'float', 'complex'],
+    'float':    ['bool', 'int',   'complex'],
+    'complex':  ['bool', 'int',   'float'  ],
     
     # Text types
-    'bytes': ['bytearray'],
+    'bytes':     ['bytearray'],
     'bytearray': ['bytes'],
 }
 

@@ -204,7 +204,7 @@ __marimo__/
 
 
 # NOT PYTHON-RELATED FILES/DIRS TO BE IGNORED
-TODO.md
+# TODO.md
 worker/logs/*
 worker/worker_dump.bin
-test/*
+system_test/*

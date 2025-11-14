@@ -1,0 +1,19 @@
+[network]
+director_ip_addr = "127.0.0.1"
+director_port = 40000
+
+[misc]
+greeting_msg = "Hello brother"
+
+[logging]
+log_level = "debug"
+log_directory = "pyfaas_director/logs"
+log_filename = "director_log.log"
+
+[statistics]
+enabled = true
+
+[workers]
+heartbeat_check_interval_ms = 2000
+expected_heartbeat_interval_ms = 2000
+worker_selection_strategy = 'Random'

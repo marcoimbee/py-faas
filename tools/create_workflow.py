@@ -35,7 +35,7 @@ def main():
         'functions': {}
     }
 
-    for i in range(function_count):
+    for i, _ in enumerate(function_count):
         structure['functions'][f'f{i+1}'] = {
             'positional_args': [],
             'default_args': {},
