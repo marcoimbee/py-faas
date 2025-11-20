@@ -273,8 +273,6 @@ class PyfaasDirector:
         self._zmq_socket.send_multipart(msg)
         self._logger.debug(f"Request from client '{client_id}' formwarded to worker '{selected_worker_id}'")
 
-    # TODO: refactor this, 
-    # TODO: fix docstring
     def _select_worker(self, func_id: str = None) -> str:
         '''
         Chooses a Worker ID from the pool of connected ones based on some policy.
