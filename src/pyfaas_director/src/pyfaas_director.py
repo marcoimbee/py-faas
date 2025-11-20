@@ -53,6 +53,9 @@ class PyfaasDirector:
         # Every how many ms a worker should send its heartbeat msg
         self._expected_heartbeat_interval_ms = self._config['workers']['expected_heartbeat_interval_ms']
 
+        # Every how many ms the Director starts the synchronization procedure
+        self._synchronization_interval_ms = self._config['workers']['synchronization_interval_ms']
+
         # Workers selection
         self._round_robin_index = 0
         self._worker_selection_strategy = self._config['workers']['worker_selection_strategy']
@@ -106,7 +109,6 @@ class PyfaasDirector:
         self._heartbeat_thread.start()
 
         # Starting workers synchronization thread
-        # TODO: make refresh interval customizable
         self._worker_synchronizer_thread = threading.Thread(
             target=self._synchronize_workers,
             args=(),
@@ -419,7 +421,8 @@ class PyfaasDirector:
         This function runs in a dedicated thread started in run().
         '''
         while True:
-            time.sleep(5)       # Try to synchronize Workers every 5s
+            # Try to synchronize Workers every self._synchronization_interval_ms milliseconds
+            time.sleep(self._synchronization_interval_ms / 1000)
             if len(self._workers) <= 1:     # No workers to synchronize or just 1 registered Worker
                 continue
             if len(self._currently_connected_clients) != 0:     # Wait until no clients are being served
@@ -500,7 +503,6 @@ class PyfaasDirector:
 
             with self._lock:
                 self._workers_are_synchronized = True
-
 
     def _compute_function_id(self, func_name: str, func_code: str) -> str:
         return hashlib.sha256(f"{func_name}:{func_code}".encode()).hexdigest()

@@ -17,3 +17,4 @@ enabled = true
 heartbeat_check_interval_ms = 2000
 expected_heartbeat_interval_ms = 2000
 worker_selection_strategy = 'Random'
+synchronization_interval_ms = 5000

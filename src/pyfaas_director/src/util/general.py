@@ -2,7 +2,7 @@ import tomli
 import logging
 import socket
 
-from exceptions import DirectorConfigError
+from ..exceptions import DirectorConfigError
 
 
 def read_config_toml(path: str) -> dict:
@@ -24,6 +24,10 @@ def read_config_toml(path: str) -> dict:
         raise DirectorConfigError(f"Config error: invalid or missing field value for 'heartbeat_check_interval_ms': {config['workers']['heartbeat_check_interval_ms']}")
     if config['workers']['expected_heartbeat_interval_ms'] is None or config['workers']['expected_heartbeat_interval_ms'] <= 0:
         raise DirectorConfigError(f"Config error: invalid or missing field value for 'expected_heartbeat_interval_ms': {config['workers']['expected_heartbeat_interval_ms']}") 
+
+    # Checking synchronization interval field
+    if config['workers']['synchronization_interval_ms'] is None or config['workers']['synchronization_interval_ms'] <= 0:
+        raise DirectorConfigError(f"Config error: invalid or missing field value for 'synchronization_interval_ms': {config['workers']['synchronization_interval_ms']}")
 
     # Checking worker selection strategy
     allowed = ['Round-Robin', 'Random']

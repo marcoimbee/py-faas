@@ -11,8 +11,8 @@ import signal
 import sys
 import uuid
 
-from exceptions import *
-from util.worker_side_workflow_validation import *
+from .exceptions import *
+from .util.worker_side_workflow_validation import *
 
 
 class WorkerOperations:
