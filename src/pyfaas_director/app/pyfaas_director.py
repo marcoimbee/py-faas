@@ -10,13 +10,15 @@ import dill
 import uuid
 import base64
 import queue
+import argparse
 
+from pathlib import Path
 from pyfaas_director.app.util import general
 from pyfaas_director.app.util.file_logger import FileLogger
 from pyfaas_director.app.exceptions import *
 
 
-_TOML_CONFIG_FILE = 'pyfaas_director/director_config.toml'
+_DEFAULT_TOML_CONFIG_FILE = 'pyfaas_director/director_config.toml'
 
 class PyfaasDirector:
     def __init__(self, config: dict):
@@ -551,9 +553,30 @@ class PyfaasDirector:
             self._logger.warning(f'Error during cleanup: {e}')
 
 
+def setup_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-c', '--config_file', default=None, help="The Director's configuration file path")
+    return parser
+
+
 def main():
+    parser = setup_parser()
+    args = parser.parse_args()
+
+    config_path = args.config_file
+    if config_path:
+        config_path = Path(config_path)
+        if not config_path.exists():
+            print(f"Config file '{config_path}' not found. Falling back to '{_DEFAULT_TOML_CONFIG_FILE}'.")
+            config_path = Path(_DEFAULT_TOML_CONFIG_FILE)
+    else:
+        print(f"Using default config file '{_DEFAULT_TOML_CONFIG_FILE}'.")
+        config_path = Path(_DEFAULT_TOML_CONFIG_FILE)
+
+    director_config_file = config_path
+
     try:
-        config = general.read_config_toml(_TOML_CONFIG_FILE)
+        config = general.read_config_toml(director_config_file)
     except Exception as e:
         logging.error(e)
         exit(0)
