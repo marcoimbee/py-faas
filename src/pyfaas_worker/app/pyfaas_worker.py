@@ -10,7 +10,9 @@ import zmq
 import sys
 import queue
 import base64
+import argparse
 
+from pathlib import Path
 from pyfaas_worker.app.util import general
 from pyfaas_worker.app.util.file_logger import FileLogger
 from pyfaas_worker.app.worker_caching.func_cache import WorkerFunctionExecutionCache
@@ -18,7 +20,7 @@ from pyfaas_worker.app.exceptions import *
 from pyfaas_worker.app.worker_operations import WorkerOperations
 
 
-_TOML_CONFIG_FILE = 'pyfaas_worker/worker_config.toml'
+_DEFAULT_TOML_CONFIG_FILE = 'pyfaas_worker/worker_config.toml'
 
 class PyfaasWorker:
     def __init__(self, config: dict):
@@ -359,9 +361,29 @@ class PyfaasWorker:
             self._zmq_socket.send_multipart(heartbeat_msg)
 
 
+def setup_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-c', '--config_file', default=None, help="The Worker's configuration file path")
+    return parser
+
+
 def main():
+    parser = setup_parser()
+    args = parser.parse_args()
+
+    config_path = args.config_file
+    if config_path:
+        config_path = Path(config_path)
+        if not config_path.exists():
+            print(f"Config file '{config_path}' not found. Falling back to '{_DEFAULT_TOML_CONFIG_FILE}'.")
+            config_path = Path(_DEFAULT_TOML_CONFIG_FILE)
+    else:
+        print(f"Using default config file '{_DEFAULT_TOML_CONFIG_FILE}'.")
+        config_path = Path(_DEFAULT_TOML_CONFIG_FILE)
+
+    worker_config_file = config_path
     try:
-        config = general.read_config_toml(_TOML_CONFIG_FILE)
+        config = general.read_config_toml(worker_config_file)
     except Exception as e:
         logging.error(e)
         exit(0)
