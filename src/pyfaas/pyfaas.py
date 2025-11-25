@@ -6,10 +6,10 @@ import atexit
 import zmq
 
 from typing import Callable
-from .pyfaas_client import pyfaas_client
-from .util.general import *
-from .util.client_side_workflow_validation import *
-from .exceptions import *
+from pyfaas.pyfaas_client import pyfaas_client
+from pyfaas.util.general import *
+from pyfaas.util.client_side_workflow_validation import *
+from pyfaas.exceptions import *
 
 
 # --- PyFaaS Client ---

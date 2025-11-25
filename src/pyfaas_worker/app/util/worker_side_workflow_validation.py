@@ -1,7 +1,7 @@
 import inspect
 
 from typing import Any, get_origin, get_args, Union
-from exceptions import WorkerWorkflowValidationError
+from pyfaas_worker.app.exceptions import WorkerWorkflowValidationError
 
 
 # Tells, for each type, the types it can be promoted to

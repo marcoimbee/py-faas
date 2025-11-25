@@ -11,9 +11,9 @@ import uuid
 import base64
 import queue
 
-from .util import general
-from .util.file_logger import FileLogger
-from .exceptions import *
+from pyfaas_director.app.util import general
+from pyfaas_director.app.util.file_logger import FileLogger
+from pyfaas_director.app.exceptions import *
 
 
 _TOML_CONFIG_FILE = 'pyfaas_director/director_config.toml'

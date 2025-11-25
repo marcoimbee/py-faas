@@ -11,11 +11,11 @@ import sys
 import queue
 import base64
 
-from .util import general
-from .util.file_logger import FileLogger
-from .worker_caching.func_cache import WorkerFunctionExecutionCache
-from .exceptions import *
-from .worker_operations import WorkerOperations
+from pyfaas_worker.app.util import general
+from pyfaas_worker.app.util.file_logger import FileLogger
+from pyfaas_worker.app.worker_caching.func_cache import WorkerFunctionExecutionCache
+from pyfaas_worker.app.exceptions import *
+from pyfaas_worker.app.worker_operations import WorkerOperations
 
 
 _TOML_CONFIG_FILE = 'pyfaas_worker/worker_config.toml'

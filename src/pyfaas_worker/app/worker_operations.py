@@ -11,8 +11,8 @@ import signal
 import sys
 import uuid
 
-from .exceptions import *
-from .util.worker_side_workflow_validation import *
+from pyfaas_worker.app.exceptions import *
+from pyfaas_worker.app.util.worker_side_workflow_validation import *
 
 
 class WorkerOperations:

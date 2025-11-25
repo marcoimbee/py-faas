@@ -1,4 +1,4 @@
-from ..exceptions import PyFaaSWorkflowValidationError
+from pyfaas.exceptions import PyFaaSWorkflowValidationError
 
 
 # Validates the workflow structurally. Type checks will then be performed worker-side.

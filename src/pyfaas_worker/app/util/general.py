@@ -2,7 +2,7 @@ import tomli
 import logging
 import socket
 
-from exceptions import WorkerConfigError
+from pyfaas_worker.app.exceptions import WorkerConfigError
 
 
 def read_config_toml(path: str) -> dict:
