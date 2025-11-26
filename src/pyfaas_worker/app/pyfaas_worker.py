@@ -304,7 +304,7 @@ class PyfaasWorker:
 
         self._logger.debug('Sync: finished synchronization procedure')
 
-    def _dump_worker_state(self) -> None:
+    def _dump_worker_state(self) -> None:       # TODO: unfinished function?
         dump = {
             'functions': self._functions,
             'stats': self._stats,
