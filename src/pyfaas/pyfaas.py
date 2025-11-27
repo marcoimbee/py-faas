@@ -401,8 +401,22 @@ def pyfaas_load_workflow(workflow_file_path: str) -> dict[str, dict[str, object]
         raise PyFaaSWorkflowLoadingError(f'Error while loading the workflow: {e}')
 
 # TODO: problematic if functions are scattered across multiple workers. Trivial if all workers are synchronized.
-# TODO: docstring
-def pyfaas_chain_exec(json_workflow: dict[str, dict[str, object]]):
+def pyfaas_chain_exec(json_workflow: dict[str, dict[str, object]]) -> object:
+    '''
+    Chain-executes a functions workflow.
+
+    Args:
+        json_workflow (dict[str, dict[str, object]]): The JSON workflow to be executed.
+
+    Returns:
+        object: The final result of the workflow execution.
+    
+    Raises:
+        RuntimeError: Raised if PyFaaS has not been configured with a call to pyfaas_config().
+        PyFaaSTimeoutError: Raised if a timeout is reached while waiting from the Director's response.
+        PyFaaSWorkflowValidationError: Raised if any error occurs during the validation of the specified workflow.
+        PyFaaSChainedExecutionError: Raised if no workflow has been specified or if any error occurs during the execution of the workflow.
+    '''
     if not _CLIENT_MANAGER.configured:
         raise RuntimeError('Unable to execute PyFaaS operations: PyFaaS has not been configured with a call to pyfaas_config()')
 
