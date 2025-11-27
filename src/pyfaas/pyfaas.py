@@ -418,6 +418,7 @@ def pyfaas_chain_exec(json_workflow: dict[str, dict[str, object]]):
         return result
     else:
         logger.error(f"Error while chain-executing workflow '{workflow_id}': {message}")
+        raise PyFaaSChainedExecutionError(message)
 
 def pyfaas_ping() -> None:
     '''
