@@ -141,7 +141,7 @@ def pyfaas_unregister(func_id: str) -> int:
     Raises:
         RuntimeError: Raised if PyFaaS has not been configured with a call to pyfaas_config().
         PyFaaSTimeoutError: Raised if a timeout is reached while waiting from the Director's response.
-        PyFaaSFunctionUnregistrationError: #TODO:
+        PyFaaSFunctionUnregistrationError: Raised if the client is trying to request the unregistration of a function that he did not register or if the specified func_id refers to a noon-existing function.
     '''
     if not _CLIENT_MANAGER.configured:
         raise RuntimeError('Unable to execute PyFaaS operations: PyFaaS has not been configured with a call to pyfaas_config()')
@@ -166,8 +166,24 @@ def pyfaas_unregister(func_id: str) -> int:
         logger.warning(f'Error while unregistering a function: {message}')
         raise PyFaaSFunctionUnregistrationError(message)
 
-# TODO:
 def pyfaas_get_stats(func_name: str = None) -> dict:
+    '''
+    Obtains a series of statistics about the specified function. 
+
+    If the func_name parameter is left unspecified, statistics about ALL 
+    the registered functions in that moment are retrieved..
+
+    Args:
+        func_name (str): The name of the function for which to receive statistics.
+
+    Returns:
+        dict: A dict containing the statistics.
+    
+    Raises:
+        RuntimeError: Raised if PyFaaS has not been configured with a call to pyfaas_config().
+        PyFaaSTimeoutError: Raised if a timeout is reached while waiting from the Director's response.
+        PyFaaSStatisticsRetrievalError: Raised if the specified func_name refers to a non-existent function.
+    '''
     if not _CLIENT_MANAGER.configured:
         raise RuntimeError('Unable to execute PyFaaS operations: PyFaaS has not been configured with a call to pyfaas_config()')
     
@@ -385,6 +401,7 @@ def pyfaas_load_workflow(workflow_file_path: str) -> dict[str, dict[str, object]
         raise PyFaaSWorkflowLoadingError(f'Error while loading the workflow: {e}')
 
 # TODO: problematic if functions are scattered across multiple workers. Trivial if all workers are synchronized.
+# TODO: docstring
 def pyfaas_chain_exec(json_workflow: dict[str, dict[str, object]]):
     if not _CLIENT_MANAGER.configured:
         raise RuntimeError('Unable to execute PyFaaS operations: PyFaaS has not been configured with a call to pyfaas_config()')
