@@ -16,5 +16,5 @@ enabled = true
 [workers]
 heartbeat_check_interval_ms = 2000
 expected_heartbeat_interval_ms = 2000
-worker_selection_strategy = 'Random'
+worker_selection_strategy = 'Round-Robin'
 synchronization_interval_ms = 5000

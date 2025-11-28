@@ -106,6 +106,7 @@ def pyfaas_register(func_code: Callable) -> str:
 
     # Calling actual pyfaas_register() function from global object
     try:
+        print("CLIENT HERE")
         director_resp_json = _CLIENT_MANAGER.client.pyfaas_register(func_code)
     except zmq.Again:
         raise PyFaaSTimeoutError('Timeout while waiting for Director\'s response during a call to pyfaas_register()')

@@ -6,3 +6,6 @@ class DirectorConfigError(DirectorError):
 
 class DirectorNoAvailableWorkersError(DirectorError):
     pass
+
+class DirectorCleanupError(DirectorError):
+    pass

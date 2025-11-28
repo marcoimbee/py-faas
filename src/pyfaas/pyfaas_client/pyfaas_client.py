@@ -31,6 +31,9 @@ class PyfaasClient:
         self._zmq_socket.connect(director_connection_string)
 
     def _send_request(self, operation: str, extra_payload: dict = None) -> dict:
+        max_retries = 3
+        backoff = 0.2       # seconds
+        
         payload = {
             'requester': self._client_id,
             'operation': operation
@@ -40,19 +43,17 @@ class PyfaasClient:
             payload.update(extra_payload)
 
         msg = [b'', json.dumps(payload).encode()]
-        self._zmq_socket.send_multipart(msg)
 
-        try:
-            _, response = self._zmq_socket.recv_multipart()
-        except zmq.Again:               
-            # TODO: here it retries automatically after 
-            # timeout without backoff or safety -> may double send, potential double execution on worker 
-            self._recreate_socket()
-            self._logger.warning(f"Timeout on '{operation}', retrying once...")
-            self._zmq_socket.send_multipart(msg)
-            _, response = self._zmq_socket.recv_multipart()
-        
-        return json.loads(response.decode())
+        for attempt in range(max_retries):
+            try:
+                self._zmq_socket.send_multipart(msg)
+                _, response = self._zmq_socket.recv_multipart()
+                return json.loads(response.decode())
+            except zmq.Again:
+                self._logger.warning(f"Timeout on '{operation}', attempt {attempt+1}/{max_retries}")
+                self._recreate_socket()
+                time.sleep(backoff)
+                backoff *= 2  # exponential backoff
     
     def _recreate_socket(self) -> None:
         try:

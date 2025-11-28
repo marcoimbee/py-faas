@@ -241,7 +241,7 @@ class PyfaasWorker:
 
             # The Director is asking the Worker for the code of a specific function that he has availabe, for synchronization purposes
             case 'sync_function_code_request':
-                self._forward_function_code(json_payload)
+                self._forward_function_code_and_registering_client(json_payload)
 
             # The Director is sending the Worker the code of one of the functions he was missing
             case 'sync_missing_function_code':
@@ -251,19 +251,21 @@ class PyfaasWorker:
                 self._file_logger.log('WARNING', f"Unknown command: '{command}'")
                 self._logger.warning(f"Client specified unknown command '{command}'")
 
-    def _forward_function_code(self, json_payload: dict) -> None:
+    def _forward_function_code_and_registering_client(self, json_payload: dict) -> None:
         '''
         TODO: 
         '''
         requested_func_id = json_payload.get('func_id')
         requested_func_code = self._functions[requested_func_id]['code']
+        requested_func_registering_client = self._functions[requested_func_id]['registering_client']
         serialized_func = dill.dumps(requested_func_code)
         serialized_func_base64 = base64.b64encode(serialized_func).decode('utf-8')
         director_json_response = {
             'operation': 'sync_state_response',
             'action': 'function_code_response',
             'func_id': requested_func_id,
-            'serialized_func_base64': serialized_func_base64
+            'registering_client': requested_func_registering_client,   # ID of the client that originally registered the function
+            'serialized_func_base64': serialized_func_base64           # Serialized code of the function
         }
         response = [b'', json.dumps(director_json_response).encode()]
         self._outgoing_tx_queue.put(response)
@@ -276,7 +278,7 @@ class PyfaasWorker:
             'functions': list(self._functions.keys())   # Send just the IDs, code will be received later on, if needed
         }
         response = [b'', json.dumps(synch_json_response).encode()]
-        self.worker._outgoing_tx_queue.put(response)
+        self._outgoing_tx_queue.put(response)
         
         # Wait for the missing functions' code and update
         # First message of this kind contains the number of messages
@@ -289,6 +291,7 @@ class PyfaasWorker:
             missing_function_code_msg = self._incoming_sync_function_code_queue.get()      # Blocks waiting for a message
 
             func_id = missing_function_code_msg['func_id']
+            func_registering_client = missing_function_code_msg['registering_client']
             serialized_func_base64 = missing_function_code_msg['serialized_func_base64']
 
             serialized_func_bytes = base64.b64decode(serialized_func_base64)
@@ -299,10 +302,14 @@ class PyfaasWorker:
                 self._functions[func_id] = {}
                 self._functions[func_id]['name'] = func_name
                 self._functions[func_id]['code'] = final_function
-                self._functions[func_id]['registering_client'] = None    # TODO: what do we do here??????
-            self._logger.debug(f"Sync: added function '{func_id}' to the set of available functions")    
+                self._functions[func_id]['registering_client'] = func_registering_client
 
-        self._logger.debug('Sync: finished synchronization procedure')
+                if self._config['statistics']['enabled']:
+                    self._stats[func_id] = {}      # Init stats entry
+
+            self._logger.debug(f"Sync: added function '{func_id}' to the set of available functions. Originally registered by '{func_registering_client}'")
+
+        self._logger.info('Sync: successfully finished synchronization procedure')
 
     def _dump_worker_state(self) -> None:       # TODO: unfinished function?
         dump = {

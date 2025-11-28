@@ -38,7 +38,7 @@ class WorkerOperations:
             if param.annotation is inspect._empty:
                 self.worker._logger.debug(f"Unspecified type annotation for parameter '{name}' of function '{func_name}'")
                 client_json_response = self._build_JSON_response(
-                    message_id=uuid.uuid4(),
+                    message_id=str(uuid.uuid4()),
                     dest_client=requester_client, 
                     director_operation='forward_to_client', 
                     original_client_operation='register',
@@ -56,7 +56,7 @@ class WorkerOperations:
         if func_signature.return_annotation is inspect._empty:
             self.worker._logger.debug(f"Unspecified return annotation of function '{func_name}'")
             client_json_response = self._build_JSON_response(
-                message_id=uuid.uuid4(),
+                message_id=str(uuid.uuid4()),
                 dest_client=requester_client, 
                 director_operation='forward_to_client', 
                 original_client_operation='register',
@@ -77,10 +77,13 @@ class WorkerOperations:
                 self.worker._functions[func_id]['name'] = func_name
                 self.worker._functions[func_id]['code'] = client_function
                 self.worker._functions[func_id]['registering_client'] = requester_client
-            self.worker._logger.info(f'Function {func_name} successfully registered')
+            self.worker._logger.info(f"Function '{func_name}' successfully registered")
             self.worker._file_logger.log('INFO', f"Function registration: '{func_name}'")
+            if self.worker._config['statistics']['enabled']:
+                self.worker._stats[func_id] = {}      # Init stats entry
+                self.worker._logger.debug(f'Stats state: {self.worker._stats}')
             client_json_response = self._build_JSON_response(
-                message_id=uuid.uuid4(),
+                message_id=str(uuid.uuid4()),
                 dest_client=requester_client, 
                 director_operation='forward_to_client', 
                 original_client_operation='register',
@@ -93,7 +96,7 @@ class WorkerOperations:
         else:
             self.worker._logger.warning(f"A function named '{func_name}' is already registered")
             client_json_response = self._build_JSON_response(
-                message_id=uuid.uuid4(),
+                message_id=str(uuid.uuid4()),
                 dest_client=requester_client, 
                 director_operation='forward_to_client', 
                 original_client_operation='register',
@@ -107,12 +110,14 @@ class WorkerOperations:
         response = [b'', json.dumps(client_json_response).encode()]
         self.worker._outgoing_tx_queue.put(response)
 
+        self.worker._logger.info(f"Function '{func_name}' successfully registered")
+
     def execute_get_cache_dump_cmd(self, json_payload: dict) -> None:
         requester_client = json_payload['requester']           # Extracting ID of the client that requested the operation
         with self.worker._lock:
             cache_dump = self.worker._function_exec_cache.get_cache_dump()
         client_json_response = self._build_JSON_response(
-            message_id=uuid.uuid4(),
+            message_id=str(uuid.uuid4()),
             dest_client=requester_client, 
             director_operation='forward_to_client', 
             original_client_operation='register',
@@ -129,7 +134,7 @@ class WorkerOperations:
         self.worker._logger.info(f"Client says: 'PING'")
         requester_client = json_payload['requester']
         client_json_response = self._build_JSON_response(
-            message_id=uuid.uuid4(),
+            message_id=str(uuid.uuid4()),
             dest_client=requester_client, 
             director_operation='forward_to_client', 
             original_client_operation='ping',
@@ -178,7 +183,7 @@ class WorkerOperations:
             info_summary['network']['last_client_connection_timestamp'] = str(self.worker._last_client_connection_ts)
 
             client_json_response = self._build_JSON_response(
-                message_id=uuid.uuid4(),
+                message_id=str(uuid.uuid4()),
                 dest_client=requester_client, 
                 director_operation='forward_to_client', 
                 original_client_operation='get_worker_info',
@@ -192,7 +197,7 @@ class WorkerOperations:
             self.worker._outgoing_tx_queue.put(response)
         except Exception as e:
             client_json_response = self._build_JSON_response(
-                message_id=uuid.uuid4(),
+                message_id=str(uuid.uuid4()),
                 dest_client=requester_client, 
                 director_operation='forward_to_client', 
                 original_client_operation='get_worker_info',
@@ -205,22 +210,23 @@ class WorkerOperations:
             response = [b'', json.dumps(client_json_response).encode()]
             self.worker._outgoing_tx_queue.put(response)
 
+    # TODO: modofy this. Data is now potentially scattered across multiple Workers
     def execute_get_stats_cmd(self, json_payload: dict) -> None:
         requester_client = json_payload['requester']
         try:
-            func_name = json_payload['func_name']
-            if func_name is not None:
-                if func_name not in self.worker._stats:
-                    raise Exception(f"No function named '{func_name}' is registered right now")
+            func_id = json_payload['func_id']
+            if func_id is not None:
+                if func_id not in self.worker._stats:
+                    raise Exception(f"No function with ID '{func_id}' is registered right now")
                 else:
                     with self.worker._lock:
-                        stats_for_client = self.worker._stats[func_name]   # Send only stats for the specified function
+                        stats_for_client = self.worker._stats[func_id]   # Send only stats for the specified function
             else:
                 with self.worker._lock:
                     stats_for_client = self.worker._stats   # No func name was specified, send all stats
 
             client_json_response = self._build_JSON_response(
-                message_id=uuid.uuid4(),
+                message_id=str(uuid.uuid4()),
                 dest_client=requester_client, 
                 director_operation='forward_to_client', 
                 original_client_operation='get_stats',
@@ -234,7 +240,7 @@ class WorkerOperations:
             self.worker._outgoing_tx_queue.put(response)
         except Exception as e:
             client_json_response = self._build_JSON_response(
-                message_id=uuid.uuid4(),
+                message_id=str(uuid.uuid4()),
                 dest_client=requester_client, 
                 director_operation='forward_to_client', 
                 original_client_operation='get_stats', 
@@ -258,7 +264,7 @@ class WorkerOperations:
             self.worker._logger.info(f'List: retrieved {len(func_list)} functions')
 
             client_json_response = self._build_JSON_response(
-                message_id=uuid.uuid4(),
+                message_id=str(uuid.uuid4()),
                 dest_client=requester_client, 
                 director_operation='forward_to_client', 
                 original_client_operation='list',
@@ -272,7 +278,7 @@ class WorkerOperations:
             self.worker._outgoing_tx_queue.put(response)
         except Exception as e:
             client_json_response = self._build_JSON_response(
-                message_id=uuid.uuid4(),
+                message_id=str(uuid.uuid4()),
                 dest_client=requester_client, 
                 director_operation='forward_to_client', 
                 original_client_operation='list', 
@@ -296,7 +302,7 @@ class WorkerOperations:
         if func_id not in self.worker._functions:
             self.worker._logger.info(f"No function with ID '{func_id}' is registered right now")
             client_json_response = self._build_JSON_response(
-                message_id=uuid.uuid4(),
+                message_id=str(uuid.uuid4()),
                 dest_client=requester_client, 
                 director_operation='forward_to_client', 
                 original_client_operation='exec',
@@ -319,7 +325,7 @@ class WorkerOperations:
 
                 encoded_func_res, func_res_type = self._encode_func_result(func_res)          # JSON or base64
                 client_json_response = self._build_JSON_response(
-                    message_id=uuid.uuid4(),
+                    message_id=str(uuid.uuid4()),
                     dest_client=requester_client, 
                     director_operation='forward_to_client', 
                     original_client_operation='exec',
@@ -334,7 +340,7 @@ class WorkerOperations:
                 self.worker._outgoing_tx_queue.put(response)
             except Exception as e:
                 client_json_response = self._build_JSON_response(
-                    message_id=uuid.uuid4(),
+                    message_id=str(uuid.uuid4()),
                     dest_client=requester_client, 
                     director_operation='forward_to_client', 
                     original_client_operation='exec',
@@ -361,7 +367,7 @@ class WorkerOperations:
         if not all_funcs_registered:
             self.worker._logger.error(f"No function named '{missing_func_name}' specified in the workflow is registered right now")
             client_json_response = self._build_JSON_response(
-                message_id=uuid.uuid4(),
+                message_id=str(uuid.uuid4()),
                 dest_client=requester_client, 
                 director_operation='forward_to_client', 
                 original_client_operation='chain_exec',
@@ -406,7 +412,7 @@ class WorkerOperations:
         except WorkerWorkflowValidationError as e:
             self.worker._logger.error(f"Error while validating workflow: {e}")
             client_json_response = self._build_JSON_response(
-                message_id=uuid.uuid4(),
+                message_id=str(uuid.uuid4()),
                 dest_client=requester_client, 
                 director_operation='forward_to_client', 
                 original_client_operation='chain_exec',
@@ -472,7 +478,7 @@ class WorkerOperations:
             encoded_func_res, func_res_type = self._encode_func_result(func_res)          # JSON or base64
 
             client_json_response = self._build_JSON_response(
-                message_id=uuid.uuid4(),
+                message_id=str(uuid.uuid4()),
                 dest_client=requester_client, 
                 director_operation='forward_to_client', 
                 original_client_operation='chain_exec',
@@ -488,7 +494,7 @@ class WorkerOperations:
         except WorkerChainedExecutionError as e:
             self.worker._logger.error(f"Error while executing workflow '{workflow_id}': {e}")
             client_json_response = self._build_JSON_response(
-                message_id=uuid.uuid4(),
+                message_id=str(uuid.uuid4()),
                 dest_client=requester_client, 
                 director_operation='forward_to_client', 
                 original_client_operation='chain_exec',
@@ -517,7 +523,7 @@ class WorkerOperations:
                 with self.worker._lock:
                     del self.worker._functions[func_id]
                 if self.worker._config['statistics']['enabled']:
-                    del self.worker._stats[func_name]
+                    del self.worker._stats[func_id]
                 client_json_response = self._build_JSON_response(
                     message_id=request_id,         # Sending back the same ID for the director to handle multiple Workers'responses
                     dest_client=requester_client, 
@@ -559,6 +565,8 @@ class WorkerOperations:
         response = [b'', json.dumps(client_json_response).encode()]
         self.worker._outgoing_tx_queue.put(response)
 
+        self.worker._logger.info(f"Unregistration procedure for '{func_name}' terminated without errors")
+
     def _execute_function(self, func_id: str, func_positional_args: list, func_default_args: dict, save_in_cache: bool) -> None:
         func_name = self.worker._functions[func_id]['name']
         self.worker._logger.info(f'Executing the following call: {func_name}({func_positional_args}, {func_default_args})')
@@ -567,11 +575,13 @@ class WorkerOperations:
 
             # Checking for cached result
             with self.worker._lock:
+                print("HERE 1")
                 func_res_already_in_cache = self.worker._function_exec_cache.check_cached(
                     func_id,
                     func_positional_args,
                     func_default_args
                 )
+                print("HERE 2")
             if func_res_already_in_cache:
                 # Result is in cache: get it
                 try:
@@ -588,6 +598,7 @@ class WorkerOperations:
                     self._file_logger.log('ERROR', f'Cache error: {e}')
                     raise Exception(e)
             else:
+                print("HERE 3")
                 # Result is NOT in cache
                 # --- FUNCTION EXECUTION ON WORKER ---
                 start_time = time.time()
@@ -595,15 +606,17 @@ class WorkerOperations:
                 func_res = requested_function(*func_positional_args, **func_default_args)
                 end_time = time.time()
                 # ------------------------------------
-
+                print("HERE 4")
                 exec_time = end_time - start_time
-                if self.worker._config['statistics']['enabled']:       
+                if self.worker._config['statistics']['enabled']:
                     self._record_stats(func_id, exec_time)   # If the result is in cache, stats are not recorded for the call
+                    print("HERE 5")
                 else:
                     self.worker._logger.info('Statistics have not been enabled')
 
                 # Add to cache if the user wants to
                 if save_in_cache:
+                    print("HERE 6")
                     try:
                         with self.worker._lock:
                             self.worker._function_exec_cache.add(func_id, func_positional_args, func_default_args, func_res)
@@ -624,26 +637,25 @@ class WorkerOperations:
             self.worker._logger.error(f"Error while executing function '{func_name}': {e}")
             raise WorkerFunctionExecutionError(e)
 
-    def _record_stats(self, func_name: str, exec_time: float) -> None:
-        if func_name not in self.worker._stats:
+    def _record_stats(self, func_id: str, exec_time: float) -> None:
+        if self.worker._stats[func_id] == {}:
             with self.worker._lock:
-                self.worker._stats[func_name] = {}
-                self.worker._stats[func_name]['#calls'] = 1
-                self.worker._stats[func_name]['avg_exec_time'] = exec_time
-                self.worker._stats[func_name]['tot_exec_time'] = exec_time
+                self.worker._stats[func_id]['#calls'] = 1
+                self.worker._stats[func_id]['avg_exec_time'] = exec_time
+                self.worker._stats[func_id]['tot_exec_time'] = exec_time
         else:
             with self.worker._lock:
-                self.worker._stats[func_name]['#calls'] += 1
-                self.worker._stats[func_name]['tot_exec_time'] += exec_time
-                avg_exec_time = self.worker._stats[func_name]['tot_exec_time'] / self.worker._stats[func_name]['#calls']
-                self.worker._stats[func_name]['avg_exec_time'] = avg_exec_time
+                self.worker._stats[func_id]['#calls'] += 1
+                self.worker._stats[func_id]['tot_exec_time'] += exec_time
+                avg_exec_time = self.worker._stats[func_id]['tot_exec_time'] / self.worker._stats[func_id]['#calls']
+                self.worker._stats[func_id]['avg_exec_time'] = avg_exec_time
 
     def _build_JSON_response(
             self, 
             message_id: str, 
             dest_client: str, 
             director_operation: str, 
-            client_operation: str, 
+            original_client_operation: str, 
             status: str, 
             action: str, 
             result_type: str, 
@@ -652,14 +664,14 @@ class WorkerOperations:
         ) -> bytes:
         return {
             'message_id': message_id,
-            'destination_client': dest_client,               # Client that requested the execution of the operation
-            'director_operation': director_operation,        # What the director should do at the reception of this msg
-            'original_client_operation': client_operation,   # The operation that was originally requested by the client, for which this message is a response
-            'status': status,                                # Outcome of the operation
-            'action': action,                                # What has been done (depends on the operation)
-            'result_type': result_type,                      # Type of the result (mostly JSON)
-            'result': result,                                # Operation result (if any)
-            'message': message                               # A non-mandatory message (used in exception handling)
+            'destination_client': dest_client,                        # Client that requested the execution of the operation
+            'operation': director_operation,                          # What the director should do at the reception of this msg
+            'original_client_operation': original_client_operation,   # The operation that was originally requested by the client, for which this message is a response
+            'status': status,                                         # Outcome of the operation
+            'action': action,                                         # What has been done (depends on the operation)
+            'result_type': result_type,                               # Type of the result (mostly JSON)
+            'result': result,                                         # Operation result (if any)
+            'message': message                                        # A non-mandatory message (used in exception handling)
         }
 
     def _encode_func_result(self, func_result: object) -> tuple[str, str]:

@@ -90,6 +90,7 @@ class PyfaasDirector:
         #       Need instead to route a single message, not every Worker's response to the request 
         self._pending_multiple_responses = {}
 
+    # TODO: docstring
     def run(self) -> None:
         # Setting up ZeroMQ stuff
         tcp_connection_str = f'tcp://{self._host}:{self._port}'
@@ -124,7 +125,7 @@ class PyfaasDirector:
                 sockets = dict(poller.poll(1000))           # 1s timeout
                 if self._zmq_socket in sockets:
                     # Receive a ZeroMQ multipart msg from a client 
-                    # (either a pyfaas client or a pyfaas worker, which is also a client at this stage)
+                    # (either a pyfaas client or a pyfaas Worker, which is also a client at this stage)
                     # Msg: [identity][empty][JSON_payload]
                     msg_parts = self._zmq_socket.recv_multipart()
 
@@ -156,9 +157,9 @@ class PyfaasDirector:
     # Handle a request from a client identified by client_id
     # The request is an operation that the client is asking to be executed on a worker
     # The director must proxy such a request to one of the registered workers
+    # TODO: docstring
     def _handle_client_request(self, client_id: str, json_payload: dict) -> None:
         operation = json_payload.get('operation')
-        self._logger.debug(f'Operation "{operation}" requested by client "{client_id}"')
 
         # Record that client is waiting for a response
         with self._lock:
@@ -166,6 +167,8 @@ class PyfaasDirector:
 
         # Proxy msg to the selected worker
         try:
+            self._logger.info(f"Client '{client_id}' requested operation: '{operation}'")
+
             # Function registration, handle data structures for synchronization
             match operation:
                 case 'register':
@@ -175,11 +178,11 @@ class PyfaasDirector:
                     func_name = func_code.__name__
                     func_id = self._compute_function_id(func_name, func_code_base64)
 
-                    # Appending the computed ID to the json payload to send to the worker
-                    json_payload['func_id'] = func_id
-                    # TODO: fix with sets
-                    selected_worker_id = list(self._workers.keys())[0]              # Choose first worker to save the function
+                    json_payload['func_id'] = func_id       # Appending the computed ID to the json payload to send to the worker
+
+                    selected_worker_id = self._select_worker()      # Choose Worker on which the function will be first saved
                     self._functions_workers_map[func_id] = [selected_worker_id]     # Until synchronized, the function can be found only on that Worker
+                    
                     with self._lock:
                         self._workers_are_synchronized = False
                     
@@ -190,30 +193,31 @@ class PyfaasDirector:
 
                     func_id = json_payload['func_id']       # Needed to know to which Worker(s) (one/more) to send the unregistration request
                     if self._functions_workers_map[func_id] != 'ANY':
-                        selected_worker_ids = self._functions_workers_map[func_id]   # Get single or multiple worker ID, but not all of them
+                        selected_worker_ids = self._functions_workers_map[func_id]   # Get Worker ID, but not all of them
                     else:
-                        selected_worker_ids = list(self._workers.values())
+                        selected_worker_ids = list(self._workers.keys())  # Get ALL Worker IDs, since the function is available everywhere
                     
                     if not selected_worker_ids:         # No Worker available
                         raise DirectorNoAvailableWorkersError
                     
+                    # Expecting #responses = #contacted workers
                     self._pending_multiple_responses[request_id] = {
                         'client_id': client_id,
-                        'remaining': len(selected_worker_ids)
+                        'remaining': len(selected_worker_ids),
+                        'additional_needed_data': {
+                            'func_id': func_id     # Embed the func_id, needed later if the client was allowed to request such an unregistration
+                        }
                     }
 
                     # Needed by the Director once the worker(s) will respond to such a request
-                    json_payload['request_id'] = request_id
+                    json_payload['request_id'] = str(request_id)
                 
                     # Send unregister message to every Worker holding the function
                     self._logger.debug(f"Sending 'unregister' request to {len(selected_worker_ids)} worker(s)")
                     for worker_id in selected_worker_ids:
                         msg = [worker_id.encode(), b'', json.dumps(json_payload).encode()]
                         self._zmq_socket.send_multipart(msg)
-                        self._logger.debug(f"Request from client '{client_id}' formwarded to worker '{worker_id}'")
-
-                    # Update function-worker mapping data structure
-                    del self._functions_workers_map[func_id]
+                        self._logger.debug(f"Request from client '{client_id}' forwarded to worker '{worker_id}'")
 
                     return      # End here, message(s) has already been forwarded
                 
@@ -251,10 +255,10 @@ class PyfaasDirector:
                 
                 case 'exec':
                     requested_func_id = json_payload.get('func_id')      # The ID (hash) of the function the user has requested the execution 
-                    self._logger.debug(f'Client {client_id} requested execution of function identified by {requested_func_id}')
+                    self._logger.debug(f"Function is identified by '{requested_func_id}'")
                     
                     selected_worker_id = self._select_worker(requested_func_id)
-                    self._logger.debug(f'Chosen worker {selected_worker_id} for {requested_func_id} execution')
+                    self._logger.debug(f"Chosen worker '{selected_worker_id}' for '{requested_func_id}' execution")
                 
                 case _:         # Any other case: any connected worker can handle the request
                     selected_worker_id = self._select_worker()
@@ -273,7 +277,7 @@ class PyfaasDirector:
 
         msg = [selected_worker_id.encode(), b'', json.dumps(json_payload).encode()]
         self._zmq_socket.send_multipart(msg)
-        self._logger.debug(f"Request from client '{client_id}' formwarded to worker '{selected_worker_id}'")
+        self._logger.debug(f"Request from client '{client_id}' forwarded to worker '{selected_worker_id}'")
 
     def _select_worker(self, func_id: str = None) -> str:
         '''
@@ -287,7 +291,7 @@ class PyfaasDirector:
 
         Raises:
             DirectorNoAvailableWorkersError: Raised if no Workers are registered to the Director. 
-        '''
+        '''        
         if not self._workers:
             raise DirectorNoAvailableWorkersError('No workers are available')
         
@@ -295,9 +299,9 @@ class PyfaasDirector:
         if func_id is not None:
             # Check if the function can be found only in a single worker (this means workers have not
             # been synchronized yet, if multiple)
-            if len(self._functions_workers_map[func_id]) != len(self._workers):
+            if self._functions_workers_map[func_id] != 'ANY':
                 if len(self._functions_workers_map[func_id]) == 1:
-                    return self._functions_workers_map[func_id]
+                    return self._functions_workers_map[func_id][0]
                 else:       # If here, during synchronization one/more Workers failed to synchronize, choose one
                     match self._worker_selection_strategy:
                         case 'Round-Robin':
@@ -307,7 +311,7 @@ class PyfaasDirector:
                             return worker_id
                         case 'Random':
                             worker_id, _ = random.choice(self._functions_workers_map[func_id])
-                            return worker_id            
+                            return worker_id
 
         # Multiple Workers and possibly synchronized, choose worker
         match self._worker_selection_strategy:
@@ -320,8 +324,9 @@ class PyfaasDirector:
                 worker_id, _ = random.choice(list(self._workers.items()))
                 return worker_id
 
+    # TODO: docstring
     def _handle_worker_request(self, worker_id: str, json_payload: dict) -> None:
-        operation = json_payload.get('director_operation')
+        operation = json_payload.get('operation')
 
         if operation is None:
             self._logger.warning(f"Worker {worker_id} sent malformed JSON: {json_payload}")
@@ -356,17 +361,31 @@ class PyfaasDirector:
                 if original_client_operation == 'unregister':
                     # Need to collect every response to the 'unregister' command from the workers and
                     # forward to the client only one of them (otherwise it would receive multiple and break everything)
-                    request_id = json_payload['message_id']
-                    pending_responses = self._pending_multiple_responses[request_id]
-                    if pending_responses is None:
+                    request_id = uuid.UUID(json_payload['message_id'])
+                    if request_id not in self._pending_multiple_responses:
                         return      # Already handled
-                    
-                    pending_responses['remaining'] -= 1
-                    if pending_responses['remaining'] != 0:
+
+                    self._pending_multiple_responses[request_id]['remaining'] -= 1
+                    self._logger.debug('Received an unregister response...')
+                    if self._pending_multiple_responses[request_id]['remaining'] != 0:
                         # This means there are sill Workers that need to send their response to the unregister command
                         return
                     else:
-                        del self._pending_multiple_responses[request_id]        # Can continue with sending the single message to the client
+                        # If here, all the Workers have responded to the unregistration request
+
+                        # Inspecting one of the Workers responses, to check if the 
+                        # client that requested the unregistering of the function was 
+                        # actually allowed to unregister it
+                        if json_payload['status'] != 'err':
+                            print("UNREGISTER OK")
+                            # Update function-worker mapping data structure, deleting the entry
+                            func_id = self._pending_multiple_responses[request_id]['additional_needed_data']['func_id']
+                            del self._functions_workers_map[func_id]
+                        else:
+                            print("UNREGISTER NOT OK")
+
+                        # Can finally delete the pending messages entry
+                        del self._pending_multiple_responses[request_id]
 
                 # The worker contacts the director to make it proxy the message to the client specified in the message
                 # The message contains the response for the client request
@@ -378,7 +397,7 @@ class PyfaasDirector:
                 response.pop('destination_client', None)        # Delete key if present
                 msg = [destination_client_id.encode(), b'', json.dumps(response).encode()]
                 self._zmq_socket.send_multipart(msg)
-                self._logger.debug(f'Routed to {destination_client_id}')
+                self._logger.debug(f"Response routed back to client '{destination_client_id}'")
 
                 # Remove client from list of clients that are waiting for a response
                 with self._lock:
@@ -397,13 +416,13 @@ class PyfaasDirector:
                     # The queue is watched by the synchronization manager thread
                     # Note: queue.Queue() is thread-safe (no need for lock)
                     self._incoming_synchronization_msg_queue.put([worker_id, json_payload])
-                    self._logger.debug(f"Received current state response from Worker '{worker_id}'")
+                    # self._logger.debug(f"Received current state response from Worker '{worker_id}'")
                     # Execution passes to the synchronizer thread from here
                 
                 # Worker is providing the code of a function previously requested to him by the Director
                 elif action == 'function_code_response':
                     self._incoming_synchronization_func_code_msg_queue.put(json_payload)
-                    self._logger.debug(f"Received function code response from Worker '{worker_id}'")
+                    # self._logger.debug(f"Received function code response from Worker '{worker_id}'")
 
             case 'heartbeat':
                 # self._logger.debug(f"received heartbeat message from '{worker_id}'")
@@ -423,12 +442,16 @@ class PyfaasDirector:
         while True:
             # Try to synchronize Workers every self._synchronization_interval_ms milliseconds
             time.sleep(self._synchronization_interval_ms / 1000)
-            if len(self._workers) <= 1:     # No workers to synchronize or just 1 registered Worker
+            if (
+                len(self._workers) <= 1 or                       # No workers to synchronize or just 1 registered Worker
+                len(self._currently_connected_clients) != 0 or   # Wait until no clients are being served
+                self._workers_are_synchronized                   # Workers are synchronized, no need to run all of this
+            ):    
+                self._logger.debug('Nothing to synchronize...')
+                self._logger.debug(f'Current Workers state: {self._functions_workers_map}')
                 continue
-            if len(self._currently_connected_clients) != 0:     # Wait until no clients are being served
-                continue
-            if self._workers_are_synchronized:      # Workers are synchronized, no need to run all of this
-                continue
+            
+            self._logger.info('Started new Worker synchronization run...')
 
             all_functions = set()   # Set of ALL registered functions in the system
 
@@ -442,34 +465,44 @@ class PyfaasDirector:
             # Wait for all the Workers' responses: watch dedicated queue
             functions_per_worker = {}       # Map to keep the functions received from each Worker in the next loop
             for _ in range(len(self._workers)):
-                worker_id, json_payload = self._incoming_synchronization_msg_queue.get()    # Blocks until a message arrives
+                # Blocks here until a 'current_functions_state' message arrives
+                worker_id, json_payload = self._incoming_synchronization_msg_queue.get()
                 worker_functions = json_payload['functions']    # Get the currently available functions IDs at the Worker which responded
                 functions_per_worker[worker_id] = set(worker_functions)
                 
                 # Union of the received function IDs with all the previously received (no duplicates)
                 all_functions |= functions_per_worker[worker_id]
+            
+            # self._logger.debug("Received every 'current_functions_state' response from the available Workers")
+            # self._logger.debug(f"All functions: {all_functions}")
 
             # Compute missing functions for each worker
+            # Elements of this map: {worker_id1: set of missing functions, worker_id2: set of missing functions, ...} 
             missing_functions_per_worker = {
                 worker_id: all_functions - funcs
                 for worker_id, funcs in functions_per_worker.items()
             }
+            # self._logger.debug(f"missing_functions_per_worker: {missing_functions_per_worker}")
 
-            # Compute the set of functions whose code needs to be requested to Workers, 
-            # so that is can be shared to the other Workers (aggregated)
-            function_code_to_be_requested = set(missing_functions_per_worker.keys())
+            # Compute the ensemble set of function IDs whose code needs to be requested to Workers that have it
+            # The code will then be shared with the Workers that don't have it
+            # function_code_to_be_Requested = set(func_id1, func_id2, ...)
+            function_code_to_be_requested = set()
+            for _, missing_func_set in missing_functions_per_worker.items():
+                function_code_to_be_requested.update(missing_func_set)
+            # self._logger.debug(f"function_code_to_be_requested: {function_code_to_be_requested}")
 
             # Ask the Workers that have available the functions missing on other 
             # Workers to provide the code for such functions
             for func_id in function_code_to_be_requested:
                 target_worker = self._select_worker(func_id)        # Get Worker to contact to get such function code
+                # self._logger.debug(f"Selected target worker: {target_worker}")
                 json_payload = {
                     'operation': 'sync_function_code_request',
                     'func_id': func_id
                 }
                 msg = [target_worker.encode(), b'', json.dumps(json_payload).encode()]
                 self._zmq_socket.send_multipart(msg)
-                self._logger.debug(f"Asked Worker '{target_worker}' for function code of function '{func_id}'")
             
             # Wait for as many messages as the number of single functions that need to be shared
             # Send such function to all the Workers that are missing it
@@ -484,7 +517,7 @@ class PyfaasDirector:
             for worker_id, missing_functions in missing_functions_per_worker.items():
                 json_payload = {
                     'operation': 'sync_missing_function_code',
-                    'missing_functions_total': missing_functions_per_worker[worker_id]
+                    'missing_functions_total': len(missing_functions_per_worker[worker_id])
                 }
                 msg = [worker_id.encode(), b'', json.dumps(json_payload).encode()]
                 self._zmq_socket.send_multipart(msg)
@@ -499,14 +532,32 @@ class PyfaasDirector:
                 for worker_id in workers_per_missing_function[func_id]:
                     msg = [worker_id.encode(), b'', json.dumps(json_payload).encode()]
                     self._zmq_socket.send_multipart(msg)
-                    self._logger.debug(f"Sent to Worker '{worker_id}' the code for function '{func_id}'")
+                    # self._logger.debug(f"Sent to Worker '{worker_id}' the code for function '{func_id}'")
 
             with self._lock:
+                # Updating the Functions-Workers map: for each function, 
+                # need to say that it is available at each Worker
+                for func_id in self._functions_workers_map.keys():
+                    self._functions_workers_map[func_id] = 'ANY'
+
                 self._workers_are_synchronized = True
+                self._logger.info(f'Workers synchronization run completed successfully')
+                self._logger.debug(f'Current Workers state: {self._functions_workers_map}')
 
     def _compute_function_id(self, func_name: str, func_code: str) -> str:
+        '''
+        Computes the ID (SHA256) of the specified (function_name, function_code) couple.
+
+        Args:
+            func_name (str): The name of the function for which the ID needs to be computed.
+            func_code (str): The code of the function for which the ID needs to be computed.
+
+        Returns:
+            str: an ID of the specified (function_name, function_code) couple. 
+        '''
         return hashlib.sha256(f"{func_name}:{func_code}".encode()).hexdigest()
 
+    # TODO: docstring
     def _heartbeats_watcher(self) -> None:
         self._logger.info('Started worker unregistration check thread...')
         while not self._threading_stop_event.is_set():
@@ -540,20 +591,38 @@ class PyfaasDirector:
                             del self._workers[worker_id]
 
     def _cleanup(self) -> None:
+        '''
+        Cleans up the Director's resources before stopping.
+
+        Stops the Worker heartbeat monitor thread and the Worker synchronization thread.
+        Closes all the previously opened ZeroMQ cpntexts and sockets.
+
+        Raises:
+            DirectorCleanupError: Raised if anything goes wrong during the cleanup procedures.
+        '''
         try:
             self._logger.info('Cleaning up Director resources...')
-            self._threading_stop_event.set()        # Signaling heartbeat thread to stop
+            self._threading_stop_event.set()        # Signaling heartbeat and sync thread to stop
             if self._heartbeat_thread and self._heartbeat_thread.is_alive():
                 self._heartbeat_thread.join(timeout=2)           # Waiting for it to exit cleanly
-                self._logger.info('Successfully stopped worker heartbeat monitor thread')
+                self._logger.info('Successfully stopped Worker heartbeat monitor thread')
+            if self._worker_synchronizer_thread and self._worker_synchronizer_thread.is_alive():
+                self._worker_synchronizer_thread.join(timeout=2) # Waiting for it to exit cleanly
+                self._logger.info('Successfully stopped Worker synchronization thread')
             self._zmq_socket.close(linger=0)
             self._zmq_context.term()
             self._logger.info('Successfully closed ZeroMQ context and socket')
-        except Exception as e:
+        except DirectorCleanupError as e:
             self._logger.warning(f'Error during cleanup: {e}')
 
 
 def setup_parser() -> argparse.ArgumentParser:
+    '''
+    Sets up a parser to parse Director-process arguments.
+
+    Returns:
+        argparse.ArgumentParser: The final parser.
+    '''
     parser = argparse.ArgumentParser()
     parser.add_argument('-c', '--config_file', default=None, help="The Director's configuration file path")
     return parser
