@@ -810,6 +810,18 @@ def setup_parser() -> argparse.ArgumentParser:
 
 
 def main():
+    '''
+    Entry point for the PyFaaS Director application.
+
+    This function performs the following steps:
+        1. Parses command-line arguments to optionally specify a configuration file.
+        2. Validates the configuration file path and falls back to the default
+           configuration file if necessary.
+        3. Loads the Director configuration from a TOML file.
+        4. Sets up logging according to the loaded configuration.
+        5. Initializes a PyFaaS Director instance.
+        6. Starts the Director's main loop, which handles Worker and Client requests.
+    '''
     parser = setup_parser()
     args = parser.parse_args()
 
