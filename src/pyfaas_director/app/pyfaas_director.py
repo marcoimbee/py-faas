@@ -140,10 +140,8 @@ class PyfaasDirector:
                     
                     # Dispatching
                     if source_id.startswith('worker-'):
-                        # self._logger.debug(f'Handling worker request (source = {source_id})')
                         self._handle_worker_request(source_id, json_payload)
                     elif source_id.startswith('client-'):
-                        # self._logger.debug(f'Handling client request (source = {source_id})')
                         self._handle_client_request(source_id, json_payload)
                     else:
                         self._logger.warning(f'Unknown message source: {source_id}')
@@ -377,12 +375,9 @@ class PyfaasDirector:
                         # client that requested the unregistering of the function was 
                         # actually allowed to unregister it
                         if json_payload['status'] != 'err':
-                            print("UNREGISTER OK")
                             # Update function-worker mapping data structure, deleting the entry
                             func_id = self._pending_multiple_responses[request_id]['additional_needed_data']['func_id']
                             del self._functions_workers_map[func_id]
-                        else:
-                            print("UNREGISTER NOT OK")
 
                         # Can finally delete the pending messages entry
                         del self._pending_multiple_responses[request_id]
@@ -416,16 +411,13 @@ class PyfaasDirector:
                     # The queue is watched by the synchronization manager thread
                     # Note: queue.Queue() is thread-safe (no need for lock)
                     self._incoming_synchronization_msg_queue.put([worker_id, json_payload])
-                    # self._logger.debug(f"Received current state response from Worker '{worker_id}'")
                     # Execution passes to the synchronizer thread from here
                 
                 # Worker is providing the code of a function previously requested to him by the Director
                 elif action == 'function_code_response':
                     self._incoming_synchronization_func_code_msg_queue.put(json_payload)
-                    # self._logger.debug(f"Received function code response from Worker '{worker_id}'")
 
             case 'heartbeat':
-                # self._logger.debug(f"received heartbeat message from '{worker_id}'")
                 with self._lock:
                     if worker_id in self._workers:
                         self._workers[worker_id]['last_heartbeat'] = datetime.datetime.now()
@@ -472,9 +464,6 @@ class PyfaasDirector:
                 
                 # Union of the received function IDs with all the previously received (no duplicates)
                 all_functions |= functions_per_worker[worker_id]
-            
-            # self._logger.debug("Received every 'current_functions_state' response from the available Workers")
-            # self._logger.debug(f"All functions: {all_functions}")
 
             # Compute missing functions for each worker
             # Elements of this map: {worker_id1: set of missing functions, worker_id2: set of missing functions, ...} 
@@ -482,7 +471,6 @@ class PyfaasDirector:
                 worker_id: all_functions - funcs
                 for worker_id, funcs in functions_per_worker.items()
             }
-            # self._logger.debug(f"missing_functions_per_worker: {missing_functions_per_worker}")
 
             # Compute the ensemble set of function IDs whose code needs to be requested to Workers that have it
             # The code will then be shared with the Workers that don't have it
@@ -490,13 +478,11 @@ class PyfaasDirector:
             function_code_to_be_requested = set()
             for _, missing_func_set in missing_functions_per_worker.items():
                 function_code_to_be_requested.update(missing_func_set)
-            # self._logger.debug(f"function_code_to_be_requested: {function_code_to_be_requested}")
 
             # Ask the Workers that have available the functions missing on other 
             # Workers to provide the code for such functions
             for func_id in function_code_to_be_requested:
                 target_worker = self._select_worker(func_id)        # Get Worker to contact to get such function code
-                # self._logger.debug(f"Selected target worker: {target_worker}")
                 json_payload = {
                     'operation': 'sync_function_code_request',
                     'func_id': func_id
@@ -532,7 +518,6 @@ class PyfaasDirector:
                 for worker_id in workers_per_missing_function[func_id]:
                     msg = [worker_id.encode(), b'', json.dumps(json_payload).encode()]
                     self._zmq_socket.send_multipart(msg)
-                    # self._logger.debug(f"Sent to Worker '{worker_id}' the code for function '{func_id}'")
 
             with self._lock:
                 # Updating the Functions-Workers map: for each function, 

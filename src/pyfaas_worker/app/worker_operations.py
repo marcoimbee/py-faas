@@ -81,7 +81,6 @@ class WorkerOperations:
             self.worker._file_logger.log('INFO', f"Function registration: '{func_name}'")
             if self.worker._config['statistics']['enabled']:
                 self.worker._stats[func_id] = {}      # Init stats entry
-                self.worker._logger.debug(f'Stats state: {self.worker._stats}')
             client_json_response = self._build_JSON_response(
                 message_id=str(uuid.uuid4()),
                 dest_client=requester_client, 
@@ -575,13 +574,11 @@ class WorkerOperations:
 
             # Checking for cached result
             with self.worker._lock:
-                print("HERE 1")
                 func_res_already_in_cache = self.worker._function_exec_cache.check_cached(
                     func_id,
                     func_positional_args,
                     func_default_args
                 )
-                print("HERE 2")
             if func_res_already_in_cache:
                 # Result is in cache: get it
                 try:
@@ -598,7 +595,6 @@ class WorkerOperations:
                     self._file_logger.log('ERROR', f'Cache error: {e}')
                     raise Exception(e)
             else:
-                print("HERE 3")
                 # Result is NOT in cache
                 # --- FUNCTION EXECUTION ON WORKER ---
                 start_time = time.time()
@@ -606,17 +602,14 @@ class WorkerOperations:
                 func_res = requested_function(*func_positional_args, **func_default_args)
                 end_time = time.time()
                 # ------------------------------------
-                print("HERE 4")
                 exec_time = end_time - start_time
                 if self.worker._config['statistics']['enabled']:
                     self._record_stats(func_id, exec_time)   # If the result is in cache, stats are not recorded for the call
-                    print("HERE 5")
                 else:
                     self.worker._logger.info('Statistics have not been enabled')
 
                 # Add to cache if the user wants to
                 if save_in_cache:
-                    print("HERE 6")
                     try:
                         with self.worker._lock:
                             self.worker._function_exec_cache.add(func_id, func_positional_args, func_default_args, func_res)
