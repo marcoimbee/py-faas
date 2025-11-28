@@ -22,6 +22,34 @@ _DEFAULT_TOML_CONFIG_FILE = 'pyfaas_director/director_config.toml'
 
 class PyfaasDirector:
     def __init__(self, config: dict):
+        '''
+        Initializes the PyFaaS Director with the provided configuration.
+
+        The constructor prepares all internal state required for handling Workers,
+        Clients, and function-distribution logic. No network binding or thread
+        startup occurs here; those are performed in `run()`.
+
+        Args:
+            config (dict): A dictionary containing Director configuration, including:
+                - network settings (`director_ip_addr`, `director_port`)
+                - logging settings
+                - worker heartbeat/synchronization parameters
+                - worker selection strategy
+
+        Initialization performed:
+            - Creates the Director logger and file logger.
+            - Loads network configuration and stores the full config.
+            - Initializes the ZeroMQ ROUTER socket and ZMQ context (not yet bound).
+            - Sets up thread-safety primitives, queues, and shared state
+            used for Worker/Client management.
+            - Prepares heartbeat monitoring and Worker-synchronization structures.
+            - Initializes the function-to-Worker mapping used for dispatching.
+            - Initializes containers used for coordinating multi-Worker operations
+            (e.g., unregister requests requiring multiple responses).
+
+        Side effects:
+            - Logs an initial greeting message from the configuration.
+        '''
         self._logger = logging.getLogger('pyfaas.director')
 
         self._host = config['network']['director_ip_addr']
@@ -90,8 +118,36 @@ class PyfaasDirector:
         #       Need instead to route a single message, not every Worker's response to the request 
         self._pending_multiple_responses = {}
 
-    # TODO: docstring
     def run(self) -> None:
+        '''
+        Starts the main event loop of the PyFaaS Director.
+
+        This method:
+            - Binds the Director's ZeroMQ ROUTER socket to the configured host/port.
+            - Starts the background heartbeat-monitoring thread that removes Workers
+            which fail to send a heartbeat within `self._heartbeat_interval_ms`.
+            - Starts the background Worker-synchronization thread that ensures all
+            connected Workers share the same set of function definitions.
+            - Enters the main polling loop, where incoming multipart ZeroMQ messages
+            are received and dispatched to the appropriate handler based on the
+            sender identity.
+
+        Message format:
+            [identity][empty][JSON_payload]
+            - `identity` identifies either a Worker (`worker-*`) or a Client (`client-*`).
+            - `JSON_payload` contains the operation to perform.
+
+        Behavior:
+            - The loop uses a 1-second poll timeout to periodically check for
+            interrupts while remaining responsive to network traffic.
+            - Worker messages are forwarded to `_handle_worker_request()`.
+            - Client messages are forwarded to `_handle_client_request()`.
+
+        Termination:
+            - Pressing Ctrl+C raises `KeyboardInterrupt`, which is caught here to
+            trigger a clean shutdown. The Director logs the shutdown event, frees
+            resources via `_cleanup()`, and exits the loop gracefully.
+        '''
         # Setting up ZeroMQ stuff
         tcp_connection_str = f'tcp://{self._host}:{self._port}'
         self._zmq_socket.bind(tcp_connection_str)
@@ -152,11 +208,40 @@ class PyfaasDirector:
                 self._cleanup()
                 break
 
-    # Handle a request from a client identified by client_id
-    # The request is an operation that the client is asking to be executed on a worker
-    # The director must proxy such a request to one of the registered workers
-    # TODO: docstring
     def _handle_client_request(self, client_id: str, json_payload: dict) -> None:
+        '''
+        Handles a request sent by a connected Client and forwards it to the appropriate Worker
+        or returns a self-generated response when no Worker interaction is required.
+
+        This method:
+            - Marks the client as waiting for a response.
+            - Inspects the requested operation and applies operation-specific routing logic.
+            - Selects a Worker (or Workers) as needed based on the operation and internal state.
+            - Forwards the request to the Worker(s), updating Director bookkeeping structures
+            (e.g., function-to-worker maps, pending multi-response tracking).
+            - In some cases (`get_worker_ids`, invalid worker info requests), responds directly
+            to the client without contacting any Worker.
+
+        Supported operations:
+            - **register**: Registers a new function on a selected Worker, computes the function ID,
+            updates synchronization state, and forwards the request to the chosen Worker.
+            - **unregister**: Sends unregister requests to all Workers holding the function and sets
+            up a multi-response tracker to aggregate Workers' replies before responding to the client.
+            - **get_worker_ids**: Returns the list of active Worker IDs directly to the client.
+            - **get_worker_info**, **get_cache_dump**: Validates the target Worker; either errors back
+            to the client or forwards the request to the specified Worker.
+            - **exec**: Selects a Worker that holds the requested function and forwards the execution
+            request.
+            - Any other operation: Forwarded to a Worker selected by the default strategy.
+
+        Args:
+            client_id (str): The ZeroMQ identity of the requesting client.
+            json_payload (dict): The JSON-decoded request body sent by the client.
+
+        Raises:
+            DirectorNoAvailableWorkersError:
+                Raised if a Worker must be contacted to serve the request but none are available.
+        '''
         operation = json_payload.get('operation')
 
         # Record that client is waiting for a response
@@ -279,17 +364,28 @@ class PyfaasDirector:
 
     def _select_worker(self, func_id: str = None) -> str:
         '''
-        Chooses a Worker ID from the pool of connected ones based on some policy.
+        Selects a worker ID from the pool of connected Workers according to the
+        configured selection strategy.
+
+        If `func_id` is provided, the selection is constrained to Workers that
+        advertise support for the given function. When multiple Workers support
+        the function, the chosen strategy determines which one is returned. 
+        If only a single Worker supports the function, that Worker is returned directly.
+
+        When `func_id` is not provided, the strategy is applied to the entire
+        set of connected Workers.
 
         Args:
-            func_id (str): In case of an 'exec' command request, the ID of the function that needs to be executed.
+            func_id (str, optional): The ID of the function for which a
+                Worker holding its code should be selected. 
+                If omitted, a generic Worker is selected.
 
         Returns:
-            str: the Worker ID that has been chosen.
+            str: The ID of the selected Worker.
 
         Raises:
-            DirectorNoAvailableWorkersError: Raised if no Workers are registered to the Director. 
-        '''        
+            DirectorNoAvailableWorkersError: Raised if no Workers are currently registered.
+        '''    
         if not self._workers:
             raise DirectorNoAvailableWorkersError('No workers are available')
         
@@ -322,8 +418,38 @@ class PyfaasDirector:
                 worker_id, _ = random.choice(list(self._workers.items()))
                 return worker_id
 
-    # TODO: docstring
     def _handle_worker_request(self, worker_id: str, json_payload: dict) -> None:
+        '''
+        Handles an incoming request from a Worker and performs the appropriate
+        Director-side action based on the Worker-provided operation.
+
+        Supported operations include:
+
+        - **worker_registration**:  
+        Registers a new Worker, initializes its metadata, and sends back an ACK
+        response. Updates the Director's internal Worker registry.
+
+        - **forward_to_client**:  
+        The Worker provides a response meant for a specific client.  
+        The Director proxies the message to the target client, optionally handling
+        multi-response operations (e.g., unregister synchronization) by tracking
+        and aggregating responses from multiple Workers.
+
+        - **sync_state_response**:  
+        Handles synchronization messages from Workers during the Director–Worker
+        state synchronization procedure. These may include reports of currently
+        available functions or responses containing missing function code.
+
+        - **heartbeat**:  
+        Updates the timestamp of the last heartbeat received from the Worker.
+
+        Any unknown operation results in a logged informational message.
+
+        Args:
+            worker_id (str): The unique ID of the Worker sending the request.
+            json_payload (dict): The parsed JSON message received from the Worker.
+                Must contain an 'operation' field indicating the request type.
+        '''
         operation = json_payload.get('operation')
 
         if operation is None:
@@ -427,11 +553,41 @@ class PyfaasDirector:
 
     def _synchronize_workers(self) -> None:
         '''
-        Synchronizes the state of the currently connected PyFaaS Workers to make sure each connected Worker has the same set of registered functions. 
+        Periodically synchronizes the set of registered functions across all
+        connected PyFaaS Workers.
 
-        This function runs in a dedicated thread started in run().
+        This method runs in a dedicated background thread started by `run()` and
+        loops indefinitely. Every `self._synchronization_interval_ms` milliseconds,
+        it performs a synchronization cycle if:
+            - more than one Worker is connected,
+            - no clients are currently being served, and
+            - the Workers are not already synchronized.
+
+        Synchronization procedure:
+            1. Each Worker is queried for its currently registered function IDs.
+            2. The function sets from all Workers are collected and merged.
+            3. For each Worker, the function IDs it is missing are computed.
+            4. The Workers that have the missing functions are contacted to obtain
+            the corresponding function code.
+            5. The missing function code is redistributed to the Workers that do
+            not have it.
+            6. The internal `self._functions_workers_map` is updated to reflect
+            global availability and a flag is set marking all Workers as
+            synchronized.
+
+        This method blocks on internal queues while waiting for synchronization
+        messages and function code responses. It holds `self._lock` briefly when
+        updating shared state.
+
+        The loop terminates if `self._threading_stop_event` is set, allowing
+        graceful shutdown of the synchronization thread.
+
+        Side effects:
+            - Sends ZeroMQ multipart messages to Workers.
+            - Updates `self._functions_workers_map`, `self._workers_are_synchronized`,
+            and logs extensive synchronization details.
         '''
-        while True:
+        while not self._threading_stop_event.is_set():
             # Try to synchronize Workers every self._synchronization_interval_ms milliseconds
             time.sleep(self._synchronization_interval_ms / 1000)
             if (
@@ -531,19 +687,43 @@ class PyfaasDirector:
 
     def _compute_function_id(self, func_name: str, func_code: str) -> str:
         '''
-        Computes the ID (SHA256) of the specified (function_name, function_code) couple.
+        Computes a unique identifier for a function based on its name and code.
+
+        The ID is computed as the SHA256 hash of the string "{func_name}:{func_code}", 
+        ensuring that each unique combination of function name and code 
+        has a reproducible, unique ID.
 
         Args:
-            func_name (str): The name of the function for which the ID needs to be computed.
-            func_code (str): The code of the function for which the ID needs to be computed.
+            func_name (str): The name of the function.
+            func_code (str): The serialized function code (e.g., base64 string).
 
         Returns:
-            str: an ID of the specified (function_name, function_code) couple. 
+            str: A SHA256 hash representing the unique function ID.
         '''
         return hashlib.sha256(f"{func_name}:{func_code}".encode()).hexdigest()
 
-    # TODO: docstring
     def _heartbeats_watcher(self) -> None:
+        '''
+        Monitors the heartbeat of all connected Workers and unregisters Workers
+        that fail to send timely heartbeats.
+
+        This method runs in a dedicated background thread and periodically checks
+        the last heartbeat timestamp of each Worker. A Worker is considered dead
+        if it misses two consecutive expected heartbeat intervals and has been
+        registered longer than a short grace period (2 × expected heartbeat interval).
+
+        For Workers deemed dead:
+            - A notification message is sent to the Worker (if still reachable).
+            - The Worker is removed from the Director's internal registry.
+
+        The loop terminates if `self._threading_stop_event` is set, allowing
+        graceful shutdown of the monitoring thread.
+
+        Side effects:
+            - Sends ZeroMQ messages to Workers marked for unregistration.
+            - Updates `self._workers` dictionary by removing dead Workers.
+            - Logs unregistration events and warnings.
+        '''
         self._logger.info('Started worker unregistration check thread...')
         while not self._threading_stop_event.is_set():
             time.sleep(self._heartbeat_check_interval_ms / 1000)
@@ -577,13 +757,25 @@ class PyfaasDirector:
 
     def _cleanup(self) -> None:
         '''
-        Cleans up the Director's resources before stopping.
+        Cleans up all resources used by the Director before shutdown.
 
-        Stops the Worker heartbeat monitor thread and the Worker synchronization thread.
-        Closes all the previously opened ZeroMQ cpntexts and sockets.
+        This method performs a graceful termination of background threads and
+        network resources:
+
+            - Signals the Worker heartbeat monitor and Worker synchronization threads
+            to stop via `self._threading_stop_event`.
+            - Waits briefly for the threads to exit cleanly.
+            - Closes the ZeroMQ ROUTER socket and terminates the ZeroMQ context.
+            - Logs the status of each cleanup operation.
 
         Raises:
-            DirectorCleanupError: Raised if anything goes wrong during the cleanup procedures.
+            DirectorCleanupError: Raised if any error occurs during the cleanup process,
+            such as failure to stop threads or close network resources.
+
+        Side effects:
+            - Stops background threads.
+            - Closes ZeroMQ sockets and context.
+            - Logs cleanup progress and warnings.
         '''
         try:
             self._logger.info('Cleaning up Director resources...')
@@ -603,10 +795,14 @@ class PyfaasDirector:
 
 def setup_parser() -> argparse.ArgumentParser:
     '''
-    Sets up a parser to parse Director-process arguments.
+    Creates and configures an ArgumentParser for the Director process.
+
+    This parser handles command-line arguments that configure the Director
+    at startup. It supports specifying a custom configuration file.
 
     Returns:
-        argparse.ArgumentParser: The final parser.
+        argparse.ArgumentParser: A fully configured ArgumentParser instance
+        ready to parse command-line arguments.
     '''
     parser = argparse.ArgumentParser()
     parser.add_argument('-c', '--config_file', default=None, help="The Director's configuration file path")
