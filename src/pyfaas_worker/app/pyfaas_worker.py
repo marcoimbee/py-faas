@@ -276,7 +276,7 @@ class PyfaasWorker:
             'functions': list(self._functions.keys())   # Send just the IDs, code will be received later on, if needed
         }
         response = [b'', json.dumps(synch_json_response).encode()]
-        self.worker._outgoing_tx_queue.put(response)
+        self._outgoing_tx_queue.put(response)
         
         # Wait for the missing functions' code and update
         # First message of this kind contains the number of messages
@@ -285,21 +285,19 @@ class PyfaasWorker:
         missing_functions_total = missing_functions_total_msg.get('missing_functions_total')
         self._logger.debug(f'Sync: waiting for the code of {missing_functions_total} function(s)')
         
-        if missing_functions_total != 0:        # Receiving the messages with the codes
-            missing_function_code_msg = self._incoming_sync_function_code_queue.get()      # Blocks waiting for a message
-
+        for _ in range(missing_functions_total):
+            missing_function_code_msg = self._incoming_sync_function_code_queue.get()
             func_id = missing_function_code_msg['func_id']
             serialized_func_base64 = missing_function_code_msg['serialized_func_base64']
-
             serialized_func_bytes = base64.b64decode(serialized_func_base64)
             final_function = dill.loads(serialized_func_bytes)
             func_name = final_function.__name__
-
             with self._lock:
-                self._functions[func_id] = {}
-                self._functions[func_id]['name'] = func_name
-                self._functions[func_id]['code'] = final_function
-                self._functions[func_id]['registering_client'] = None    # TODO: what do we do here??????
+                self._functions[func_id] = {
+                    'name': func_name,
+                    'code': final_function,
+                    'registering_client': None          # TODO: what do we do here???
+                }
             self._logger.debug(f"Sync: added function '{func_id}' to the set of available functions")    
 
         self._logger.debug('Sync: finished synchronization procedure')

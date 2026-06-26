@@ -297,7 +297,7 @@ class PyfaasDirector:
             # been synchronized yet, if multiple)
             if len(self._functions_workers_map[func_id]) != len(self._workers):
                 if len(self._functions_workers_map[func_id]) == 1:
-                    return self._functions_workers_map[func_id]
+                    return self._functions_workers_map[func_id][0]
                 else:       # If here, during synchronization one/more Workers failed to synchronize, choose one
                     match self._worker_selection_strategy:
                         case 'Round-Robin':
@@ -306,7 +306,7 @@ class PyfaasDirector:
                             self._round_robin_index += 1
                             return worker_id
                         case 'Random':
-                            worker_id, _ = random.choice(self._functions_workers_map[func_id])
+                            worker_id = random.choice(self._functions_workers_map[func_id])
                             return worker_id            
 
         # Multiple Workers and possibly synchronized, choose worker
@@ -457,7 +457,9 @@ class PyfaasDirector:
 
             # Compute the set of functions whose code needs to be requested to Workers, 
             # so that is can be shared to the other Workers (aggregated)
-            function_code_to_be_requested = set(missing_functions_per_worker.keys())
+            function_code_to_be_requested = set()
+            for funcs in missing_functions_per_worker.values():
+                function_code_to_be_requested.update(funcs)
 
             # Ask the Workers that have available the functions missing on other 
             # Workers to provide the code for such functions

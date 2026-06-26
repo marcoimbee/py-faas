@@ -117,7 +117,7 @@ class WorkerFunctionExecutionCache():
             key_str = json.dumps(serialize_key(func_name, func_positional_args, func_default_args))
             cache_dump[key_str] = {
                 'func_name': node.func_name,
-                'func_positional_args': node.func_positiobal_args,     # already list
+                'func_positional_args': node.func_positional_args,   # already list
                 'func_default_args': node.func_default_args,         # already dict
                 'func_result': node.func_result
             }

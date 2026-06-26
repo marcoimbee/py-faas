@@ -400,7 +400,7 @@ def pyfaas_chain_exec(json_workflow: dict[str, dict[str, object]]):
         raise PyFaaSWorkflowValidationError(e)
     
     # If here, workflow is STRUCTURALLY valid, and can be passed to the worker
-    logger.info(f'Provided workwlow is structurally valid')
+    logger.info(f'Provided workflow is structurally valid')
     
     # Calling actual pyfaas_chain_exec() function from global object
     try:
