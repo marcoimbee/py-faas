@@ -209,23 +209,25 @@ class WorkerOperations:
             response = [b'', json.dumps(client_json_response).encode()]
             self.worker._outgoing_tx_queue.put(response)
 
-    # TODO: modofy this. Data is now potentially scattered across multiple Workers
     def execute_get_stats_cmd(self, json_payload: dict) -> None:
         requester_client = json_payload['requester']
+        request_id = json_payload['request_id']
         try:
-            func_id = json_payload['func_id']
-            if func_id is not None:
-                if func_id not in self.worker._stats:
-                    raise Exception(f"No function with ID '{func_id}' is registered right now")
-                else:
-                    with self.worker._lock:
-                        stats_for_client = self.worker._stats[func_id]   # Send only stats for the specified function
-            else:
-                with self.worker._lock:
-                    stats_for_client = self.worker._stats   # No func name was specified, send all stats
+            # Get stats for the functions registered by the requesting client
+            target_functions_id = [
+                func_id 
+                for func_id, func_data in self.worker._functions.items() 
+                if func_data['registering_client'] == requester_client
+            ]
+            stats_for_client = {
+                func_id: stats
+                for func_id, stats in self.worker._stats.items()
+                if func_id in target_functions_id
+            }
+            self.worker._logger.info(f'get_stats: retrieved stats for {len(target_functions_id)} functions')
 
             client_json_response = self._build_JSON_response(
-                message_id=str(uuid.uuid4()),
+                message_id=request_id,
                 dest_client=requester_client, 
                 director_operation='forward_to_client', 
                 original_client_operation='get_stats',
@@ -254,16 +256,17 @@ class WorkerOperations:
 
     def execute_list_cmd(self, json_payload: dict) -> None:
         requester_client = json_payload['requester']
+        request_id = json_payload['request_id']
         try:
             func_list = {
-                func_id: data
+                func_id: data['name']
                 for func_id, data in self.worker._functions.items()
                 if data['registering_client'] == requester_client
             }
             self.worker._logger.info(f'List: retrieved {len(func_list)} functions')
 
             client_json_response = self._build_JSON_response(
-                message_id=str(uuid.uuid4()),
+                message_id=request_id,
                 dest_client=requester_client, 
                 director_operation='forward_to_client', 
                 original_client_operation='list',
@@ -676,11 +679,11 @@ class WorkerOperations:
             func_result_base64 = base64.b64encode(func_result_bytes).decode()
             return func_result_base64, 'pickle_base64'
 
-    def _check_function_set_registration(self, function_set: list[str]) -> tuple[bool, str | None]:
-        for func in function_set:
-            if func not in self.worker._functions:
-                return False, func
-        return True, None
+    # def _check_function_set_registration(self, function_set: list[str]) -> tuple[bool, str | None]:
+    #     for func in function_set:
+    #         if func not in self.worker._functions:
+    #             return False, func
+    #     return True, None
 
     # TODO:
     # # Runs inside the child process

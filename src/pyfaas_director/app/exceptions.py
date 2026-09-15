@@ -9,3 +9,6 @@ class DirectorNoAvailableWorkersError(DirectorError):
 
 class DirectorCleanupError(DirectorError):
     pass
+
+class DirectorWorkflowValidationError(DirectorError):
+    pass

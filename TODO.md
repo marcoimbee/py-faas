@@ -1,13 +1,11 @@
 # ONGOING
-- Test synchronization
-- Test everything with proper testing strategies
 - Remove all TODOs
-
+- Memory limit/sandboxing/time limit:
+    - Run each function in a subprocess with timeout and resource limits
 
 # TODO
 - Implement other caching strategies: LFU, TTL-based
 - Web dashboard
-- Docstring for basically everything
 - Authentication (see ZMQ CURVE encryption)
 - Possibility for full remote code execution on worker
 - Dill and bas64 usage:
@@ -16,13 +14,10 @@
     - Can use cryptographic signatures or hash validation of serialized function
 - Replace dill with secure and faster serialization?
 - Make director choose a worker based on its proximity?
-- Memory limit/sandboxing/time limit:
-    - Run each function in a subprocess with timeout and resource limits
 
 
 ### RESILIENCE
 - Worker can shutdown mid-operation, what to do?
-- Director fault tolerance: store worker data on Redis, restore when up gaain
 
 ### API
 - Async execution

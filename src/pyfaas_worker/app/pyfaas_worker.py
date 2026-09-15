@@ -16,7 +16,6 @@ from pathlib import Path
 from pyfaas_worker.app.util import general
 from pyfaas_worker.app.util.file_logger import FileLogger
 from pyfaas_worker.app.worker_caching.func_cache import WorkerFunctionExecutionCache
-from pyfaas_worker.app.exceptions import *
 from pyfaas_worker.app.worker_operations import WorkerOperations
 
 
@@ -252,9 +251,6 @@ class PyfaasWorker:
                 self._logger.warning(f"Client specified unknown command '{command}'")
 
     def _forward_function_code_and_registering_client(self, json_payload: dict) -> None:
-        '''
-        TODO: 
-        '''
         requested_func_id = json_payload.get('func_id')
         requested_func_code = self._functions[requested_func_id]['code']
         requested_func_registering_client = self._functions[requested_func_id]['registering_client']
@@ -311,7 +307,8 @@ class PyfaasWorker:
 
         self._logger.info('Sync: successfully finished synchronization procedure')
 
-    def _dump_worker_state(self) -> None:       # TODO: unfinished function?
+    # TODO: are these functions useful?
+    def _dump_worker_state(self) -> None:
         dump = {
             'functions': self._functions,
             'stats': self._stats,

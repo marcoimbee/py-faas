@@ -97,11 +97,8 @@ class PyfaasClient:
         }
         return self._send_request('unregister', extra_payload)
     
-    def pyfaas_get_stats(self, func_name: str = None) -> dict:
-        extra_payload = {
-            'func_name': func_name
-        }
-        return self._send_request('get_stats', extra_payload)
+    def pyfaas_get_stats(self) -> dict:
+        return self._send_request('get_stats')
 
     def pyfaas_list(self) -> dict:
         return self._send_request('list')

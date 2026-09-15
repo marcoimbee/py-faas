@@ -18,7 +18,7 @@ def read_config_toml(path: str) -> dict:
         raise Exception(f'Config error: invalid director IP address {config['network']['director_ip_addr']}')
     
     # Checking receive timeout field
-    if type(config['network']['receive_timeout_s']) != int:
+    if type(config['network']['receive_timeout_s']) is not int:
         raise Exception(f"Config error: field 'receive_timeout_s' must be of type 'str', while '{type(config['network']['receive_timeout_s'])}' was provided")
     if config['network']['receive_timeout_s'] < 0:
         raise Exception(f"Config error: invalid value {config['network']['receive_timeout_s']} for field 'receive_timeout_s'")

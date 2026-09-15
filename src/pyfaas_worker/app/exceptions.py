@@ -4,9 +4,6 @@ class WorkerError(Exception):
 class WorkerConfigError(WorkerError):
     pass
 
-class WorkerDirectorConnectionError(WorkerError):
-    pass
-
 class WorkerWorkflowValidationError(WorkerError):
     pass
 

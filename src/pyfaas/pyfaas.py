@@ -7,9 +7,26 @@ import zmq
 
 from typing import Callable
 from pyfaas.pyfaas_client import pyfaas_client
-from pyfaas.util.general import *
-from pyfaas.util.client_side_workflow_validation import *
-from pyfaas.exceptions import *
+from pyfaas.util.general import read_config_toml, setup_logging
+from pyfaas.util.client_side_workflow_validation import validate_json_workflow_structure
+from pyfaas.exceptions import (
+    PyFaaSCacheDumpingError,
+    PyFaaSChainedExecutionError,
+    PyFaaSConfigError,
+    PyFaaSFunctionExecutionError,
+    PyFaaSTimeoutError,
+    PyFaaSWorkflowValidationError,
+    PyFaaSParameterMismatchError,
+    PyFaaSDeserializationError,
+    PyFaaSWorkerIDsRetrievalError,
+    PyFaaSPingingError,
+    PyFaaSFunctionRegistrationError,
+    PyFaaSFunctionListingError,
+    PyFaaSStatisticsRetrievalError,
+    PyFaaSFunctionUnregistrationError,
+    PyFaaSWorkflowLoadingError,
+    PyFaaSWorkerInfoError
+)
 
 
 # --- PyFaaS Client ---
@@ -66,7 +83,7 @@ def pyfaas_config(file_path: str = None) -> None:
         
         logger.info(f'PyFaaS has been configured using {_CONFIG_FILE_PATH}')
     else:
-        logger.info(f'PyFaaS has already been configured. Reusing existing PyFaaS client')
+        logger.info('PyFaaS has already been configured. Reusing existing PyFaaS client')
 
 def pyfaas_close():
     '''
@@ -106,7 +123,6 @@ def pyfaas_register(func_code: Callable) -> str:
 
     # Calling actual pyfaas_register() function from global object
     try:
-        print("CLIENT HERE")
         director_resp_json = _CLIENT_MANAGER.client.pyfaas_register(func_code)
     except zmq.Again:
         raise PyFaaSTimeoutError('Timeout while waiting for Director\'s response during a call to pyfaas_register()')
@@ -167,15 +183,9 @@ def pyfaas_unregister(func_id: str) -> int:
         logger.warning(f'Error while unregistering a function: {message}')
         raise PyFaaSFunctionUnregistrationError(message)
 
-def pyfaas_get_stats(func_name: str = None) -> dict:
+def pyfaas_get_stats() -> dict:
     '''
-    Obtains a series of statistics about the specified function. 
-
-    If the func_name parameter is left unspecified, statistics about ALL 
-    the registered functions in that moment are retrieved..
-
-    Args:
-        func_name (str): The name of the function for which to receive statistics.
+    Obtains a series of statistics about the functions that have been registered by the requesting client. 
 
     Returns:
         dict: A dict containing the statistics.
@@ -183,14 +193,13 @@ def pyfaas_get_stats(func_name: str = None) -> dict:
     Raises:
         RuntimeError: Raised if PyFaaS has not been configured with a call to pyfaas_config().
         PyFaaSTimeoutError: Raised if a timeout is reached while waiting from the Director's response.
-        PyFaaSStatisticsRetrievalError: Raised if the specified func_name refers to a non-existent function.
     '''
     if not _CLIENT_MANAGER.configured:
         raise RuntimeError('Unable to execute PyFaaS operations: PyFaaS has not been configured with a call to pyfaas_config()')
     
     # Calling actual pyfaas_get_stats() function from global object
     try:
-        director_resp_json = _CLIENT_MANAGER.client.pyfaas_get_stats(func_name)
+        director_resp_json = _CLIENT_MANAGER.client.pyfaas_get_stats()
     except zmq.Again:
         raise PyFaaSTimeoutError('Timeout while waiting for Director\'s response during a call to pyfaas_get_stats()')
 
@@ -199,17 +208,11 @@ def pyfaas_get_stats(func_name: str = None) -> dict:
     message = director_resp_json.get('message')
 
     if status == 'ok':
-        if func_name is not None:
-            logger.info(f"Retrieved stats for '{func_name}'")
-        else:
-            logger.info(f'Retrieved general stats')
+        logger.info('Retrieved stats')
         logger.debug(f'Stats: {json_stats}')
         return json_stats
     else:
-        if func_name is not None:
-            logger.error(f"Error while retrieving stats for '{func_name}': {message}")
-        else:
-            logger.error(f'Error while retrieving general stats: {message}')
+        logger.error(f'Error while retrieving stats: {message}')
         raise PyFaaSStatisticsRetrievalError(message)
 
 def pyfaas_list() -> dict:
@@ -241,7 +244,7 @@ def pyfaas_list() -> dict:
         logger.info(f'Retrieved {len(func_list)} functions')
         return func_list
     else:
-        logger.warning(f'Error while listing functions on the worker: {message}')
+        logger.warning(f'Error while listing functions on the Worker(s): {message}')
         raise PyFaaSFunctionListingError(message)
 
 # TODO: is it possible not to pass positional args?
@@ -267,7 +270,7 @@ def pyfaas_exec(func_id: str, func_positional_args_list: list[object], func_defa
     if not _CLIENT_MANAGER.configured:
         raise RuntimeError('Unable to execute PyFaaS operations: PyFaaS has not been configured with a call to pyfaas_config()')
     
-    if type(func_positional_args_list) != list:
+    if type(func_positional_args_list) is not list:
         logger.error(f"Parameters mismatch: func_arglist must be of type 'list[object]', while {type(func_positional_args_list)} was provided")
         raise PyFaaSParameterMismatchError(f"Parameters mismatch: func_arglist must be of type 'list[object]', while {type(func_positional_args_list)} was provided")
 
@@ -401,7 +404,6 @@ def pyfaas_load_workflow(workflow_file_path: str) -> dict[str, dict[str, object]
     except Exception as e:
         raise PyFaaSWorkflowLoadingError(f'Error while loading the workflow: {e}')
 
-# TODO: problematic if functions are scattered across multiple workers. Trivial if all workers are synchronized.
 def pyfaas_chain_exec(json_workflow: dict[str, dict[str, object]]) -> object:
     '''
     Chain-executes a functions workflow.
@@ -431,8 +433,8 @@ def pyfaas_chain_exec(json_workflow: dict[str, dict[str, object]]) -> object:
         logger.error(f'Error while validating the workflow: {e}')
         raise PyFaaSWorkflowValidationError(e)
     
-    # If here, workflow is STRUCTURALLY valid, and can be passed to the worker
-    logger.info(f'Provided workwlow is structurally valid')
+    # If here, workflow is STRUCTURALLY valid (it's valid JSON and respctes the expected), and can be passed to the worker
+    logger.info('Provided workflow is structurally valid')
     
     # Calling actual pyfaas_chain_exec() function from global object
     try:
