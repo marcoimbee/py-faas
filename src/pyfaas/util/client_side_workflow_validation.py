@@ -69,7 +69,7 @@ def validate_json_workflow_structure(workflow: dict[str, dict[str, object]]) -> 
         if 'cache_result' not in func_data:
             raise PyFaaSWorkflowValidationError(f"Missing field 'cache_result' for object '{func_name}'")
         if not isinstance(func_data['cache_result'], bool):
-            raise PyFaaSWorkflowValidationError(f"Field 'cache_Result' for function '{func_name}' must be of type list")
+            raise PyFaaSWorkflowValidationError(f"Field 'cache_result' for function '{func_name}' must be of type bool")
 
         # 'positional_args' field check
         if 'positional_args' not in func_data:
@@ -138,13 +138,11 @@ def _is_function_unreachable(func_name: str, next_list: list[str], entry_func: s
 # Need to check if the referenced function name is actually a function that has been specified in the workflow definition
 def _check_pos_args_and_def_args_references(positional_arg_references: list[str], default_arg_references: list[dict], func_names: list[str]) -> None:
     for pos_arg in positional_arg_references:
-        arg_func_name = pos_arg.lstrip('$')
-        arg_func_name = arg_func_name.rstrip('.output')
+        arg_func_name = pos_arg.removeprefix('$').removesuffix('.output')
         if arg_func_name not in func_names:
             raise Exception(f"Unknown function '{arg_func_name}' in referenced positional argument '{pos_arg}'")
     for def_arg in default_arg_references:
-        def_arg_func_name = def_arg.lstrip('$')
-        def_arg_func_name = def_arg_func_name.rstrip('.output')
+        def_arg_func_name = pos_arg.removeprefix('$').removesuffix('.output')
         if def_arg_func_name not in func_names:
             raise Exception(f"Unknown function '{def_arg_func_name}' in referenced default argument '{def_arg}'")
 

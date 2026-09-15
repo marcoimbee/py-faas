@@ -168,7 +168,7 @@ class WorkerOperations:
             # Worker configuration info
             info_summary['config'] = {}
             info_summary['config']['enabled_statistics'] = self.worker._config['statistics']['enabled']
-            info_summary['config']['log_level'] = self.worker._config['misc']['log_level']
+            info_summary['config']['log_level'] = self.worker._config['logging']['log_level']
 
             # TODO: add execution limits in info
 
@@ -437,7 +437,7 @@ class WorkerOperations:
             save_in_cache = workflow_function_set[entry_func_name]['cache_result']
 
             entry_func_res = self._execute_function(
-                func_name=entry_func_name,
+                func_id=entry_func_name,
                 func_positional_args=entry_func_positional_args,
                 func_default_args=entry_func_default_args,
                 save_in_cache=save_in_cache
@@ -463,7 +463,7 @@ class WorkerOperations:
                         func_default_args[def_arg_name] = prev_func_result
                 
                 func_res = self._execute_function(
-                    func_name=func_name,
+                    func_id=func_name,
                     func_positional_args=func_positional_args,
                     func_default_args=func_default_args,
                     save_in_cache=save_in_cache
@@ -593,6 +593,7 @@ class WorkerOperations:
                         )
                     self._logger.info(f"Got cached result: '{func_res}' for '{func_name}'")
                     self._file_logger.log('INFO', 'Cache hit')
+                    return func_res
                 except WorkerFunctionCacheError as e:
                     self._logger.error(f'Exception while fetching result from cache: {e}')
                     self._file_logger.log('ERROR', f'Cache error: {e}')

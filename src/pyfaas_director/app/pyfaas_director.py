@@ -453,7 +453,7 @@ class PyfaasDirector:
                             self._round_robin_index += 1
                             return worker_id
                         case 'Random':
-                            worker_id, _ = random.choice(self._functions_workers_map[func_id]['available_on'])
+                            worker_id = random.choice(self._functions_workers_map[func_id]['available_on'])
                             return worker_id
 
         # Multiple Workers and possibly synchronized, choose worker

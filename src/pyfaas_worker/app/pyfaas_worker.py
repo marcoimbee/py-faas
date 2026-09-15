@@ -283,17 +283,14 @@ class PyfaasWorker:
         missing_functions_total = missing_functions_total_msg.get('missing_functions_total')
         self._logger.debug(f'Sync: waiting for the code of {missing_functions_total} function(s)')
         
-        if missing_functions_total != 0:        # Receiving the messages with the codes
-            missing_function_code_msg = self._incoming_sync_function_code_queue.get()      # Blocks waiting for a message
-
+        for _ in range(missing_functions_total):
+            missing_function_code_msg = self._incoming_sync_function_code_queue.get()
             func_id = missing_function_code_msg['func_id']
             func_registering_client = missing_function_code_msg['registering_client']
             serialized_func_base64 = missing_function_code_msg['serialized_func_base64']
-
             serialized_func_bytes = base64.b64decode(serialized_func_base64)
             final_function = dill.loads(serialized_func_bytes)
             func_name = final_function.__name__
-
             with self._lock:
                 self._functions[func_id] = {}
                 self._functions[func_id]['name'] = func_name
