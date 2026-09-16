@@ -180,6 +180,22 @@ log_level = "info"
 
 Examples on how to use PyFaaS functions can be found [at this link](docs/EXAMPLES.md).
 
+## Testing
+
+Tests are provided in the `tests/` folder.
+
+To run all the tests in Powershell:
+
+```bash
+./tests/run_tests.ps1
+```
+
+To run all the tests in a Linux terminal:
+
+```bash
+./tests/run_tests.sh
+```
+
 ## Notes
 
 - The chained execution of functions and their structuring using user-defined workflows are topics that have have been inspired by [this project](https://github.com/edgeless-project/edgeless).
