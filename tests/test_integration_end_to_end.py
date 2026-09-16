@@ -100,4 +100,4 @@ def test_full_register_exec_list_stats_unregister_roundtrip(cluster):
     # NOTE: deliberately not exec-ing func_id again here. Doing so crashes the Director's
     # I/O thread (KeyError in _select_worker, since unregister already deleted the
     # func_id -> worker mapping) -- see test_exec_after_unregister_crashes_director in
-    # test_director_core.py for a focused regression test of that new finding.
+    # test_director_core.py for a focused regression test of that bug.

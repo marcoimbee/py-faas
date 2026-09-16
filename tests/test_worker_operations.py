@@ -161,6 +161,17 @@ def test_unregister_unknown_func_id(ops, worker_stub):
     assert response['action'] == 'no_func'
 
 
+def test_unregister_failure_should_not_log_terminated_without_errors(ops, worker_stub):
+    # execute_unregister_cmd unconditionally logs "... terminated without
+    # errors" as its last line, even on the 'no_func'/'forbidden' failure paths.
+    ops.execute_unregister_cmd({'requester': 'client-1', 'request_id': 'req-1', 'func_id': 'ghost'})
+
+    logged_messages = [call.args[0] for call in worker_stub._logger.info.call_args_list]
+    if any('terminated without errors' in msg for msg in logged_messages):
+        pytest.xfail("execute_unregister_cmd logs '... terminated without errors' even when the "
+                      "unregistration actually failed (status='err')")
+
+
 # --- get_stats ---
 
 def test_get_stats_filters_by_requesting_client(ops, worker_stub):
@@ -230,11 +241,10 @@ def test_exec_raising_function_returns_err(ops, worker_stub):
     assert 'kaboom' in response['message']
 
 
-@pytest.mark.xfail(reason="new finding: execute_exec_cmd does `.get('default_args', {})`, but the low-level "
-                           'PyfaasClient.pyfaas_exec() sends an explicit default_args=None (its own default '
-                           "parameter value) instead of omitting the key -- .get() then returns None rather than "
-                           '{}, and **None crashes cache-key building before the function ever runs. Only the '
-                           'higher-level pyfaas.pyfaas_exec() wrapper works around this by normalizing None to {} '
+@pytest.mark.xfail(reason="execute_exec_cmd does `.get('default_args', {})`, but PyfaasClient.pyfaas_exec() "
+                           'sends an explicit default_args=None instead of omitting the key -- .get() then '
+                           'returns None rather than {}, and **None crashes cache-key building before the '
+                           'function ever runs. pyfaas.pyfaas_exec() avoids this by normalizing None to {} '
                            'itself before calling the client.')
 def test_exec_none_default_args_crashes(ops, worker_stub):
     worker_stub._functions['fid1'] = {'name': 'add', 'code': add, 'registering_client': 'client-1'}

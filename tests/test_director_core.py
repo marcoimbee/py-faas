@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from pyfaas_director.app.exceptions import DirectorNoAvailableWorkersError
+from pyfaas_director.app.exceptions import DirectorConfigError, DirectorNoAvailableWorkersError
 from pyfaas_director.app.pyfaas_director import PyfaasDirector
 
 
@@ -243,3 +243,122 @@ def test_heartbeats_watcher_grace_period_protects_new_worker(director, monkeypat
     director._heartbeats_watcher()
 
     assert 'worker-new' in director._workers
+
+
+# --- known-bug regression: chain_exec is silently dropped across unsynchronized multi-worker clusters ---
+
+def test_chain_exec_on_unsynchronized_multi_worker_cluster_should_not_be_silently_dropped(director):
+    # _handle_client_request's 'chain_exec' case does nothing (`pass`) in the
+    # unsynchronized, >1-worker branch: no response is ever sent, and the client
+    # is never removed from _currently_connected_clients, which also permanently
+    # blocks _synchronize_workers (it refuses to run while any client is pending).
+    director._workers = {'worker-1': {}, 'worker-2': {}}
+    director._workers_are_synchronized = False
+    func_id = director._compute_function_id('add', 'code')
+    director._functions_workers_map[func_id] = {
+        'func_name': 'add', 'registering_client': 'client-1', 'available_on': ['worker-1'],
+    }
+    workflow = {
+        'id': 'wf1', 'entry_function': 'add',
+        'functions': {'add': {'positional_args': [], 'default_args': {}, 'next': '', 'cache_result': False}},
+    }
+
+    director._handle_client_request('client-1', {'operation': 'chain_exec', 'json_workflow': workflow})
+
+    if director._zmq_socket.send_multipart.call_count == 0 and 'client-1' in director._currently_connected_clients:
+        pytest.xfail('chain_exec on an unsynchronized multi-worker cluster sends no response and never '
+                      'releases the client, permanently blocking worker synchronization')
+
+
+# --- known-bug regression: chain_exec has no server-side structural validation ---
+
+def test_chain_exec_malformed_workflow_should_not_crash_director(director):
+    # _handle_client_request's 'chain_exec' case does
+    # workflow_function_set.items() where workflow_function_set = json_workflow.get('functions'),
+    # trusting the client to have already run client-side validation. A client
+    # that skips it (or talks to the ZMQ socket directly) can send a workflow
+    # with no 'functions' key at all and crash the Director.
+    director._workers = {'worker-1': {}}
+    try:
+        director._handle_client_request('client-1', {
+            'operation': 'chain_exec', 'json_workflow': {'id': 'wf1', 'entry_function': 'add'},
+        })
+    except AttributeError:
+        pytest.xfail('chain_exec with a malformed workflow (missing "functions") raises an uncaught '
+                      'AttributeError and crashes the Director')
+
+    payload = sent_payloads(director._zmq_socket)[0]
+    assert payload['status'] == 'err'
+
+
+# --- known-bug regression: 'unregister' aggregation uses only the last Worker response ---
+
+def test_unregister_aggregation_should_consider_all_worker_responses(director):
+    # Unlike 'list'/'get_stats' (which use any(status == 'err' ...) across every
+    # response), the 'unregister' branch only inspects the LAST response that
+    # arrives. If workers disagree, the outcome depends on network arrival order
+    # instead of being deterministic -- here the first (discarded) response is an
+    # error but the last (decisive) one is 'ok', so the func_id gets removed even
+    # though one worker reported a problem.
+    import uuid
+    request_id = uuid.uuid4()
+    func_id = 'fid1'
+    director._currently_connected_clients = ['client-1']
+    director._functions_workers_map[func_id] = {'func_name': 'add', 'registering_client': 'client-1', 'available_on': ['worker-1', 'worker-2']}
+    director._pending_multiple_responses[request_id] = {
+        'client_id': 'client-1', 'remaining': 2, 'additional_needed_data': {'func_id': func_id},
+    }
+
+    director._handle_worker_request('worker-1', {
+        'operation': 'forward_to_client', 'original_client_operation': 'unregister',
+        'message_id': str(request_id), 'destination_client': 'client-1', 'status': 'err',
+    })
+    director._handle_worker_request('worker-2', {
+        'operation': 'forward_to_client', 'original_client_operation': 'unregister',
+        'message_id': str(request_id), 'destination_client': 'client-1', 'status': 'ok',
+    })
+
+    if func_id not in director._functions_workers_map:
+        pytest.xfail("unregister aggregation only inspects the last worker's response (here 'ok'), "
+                      "ignoring an earlier 'err' response from a different worker")
+
+
+# --- known-bug regression: dead-worker cleanup leaves stale _functions_workers_map entries ---
+
+def test_dead_worker_removal_should_clean_up_functions_workers_map(director, monkeypatch):
+    # _heartbeats_watcher deletes the dead worker from self._workers but never
+    # touches _functions_workers_map, so a function whose only home was that
+    # worker is still listed as available there -- future exec/unregister
+    # requests for it get routed to a ZMQ identity that no longer exists.
+    now = datetime.datetime.now()
+    director._workers = {
+        'worker-dead': {'registered_at': now - datetime.timedelta(seconds=100), 'last_heartbeat': now - datetime.timedelta(seconds=100)},
+    }
+    director._functions_workers_map['fid1'] = {'func_name': 'add', 'registering_client': 'client-1', 'available_on': ['worker-dead']}
+
+    def fake_sleep(_):
+        director._threading_stop_event.set()
+
+    monkeypatch.setattr(time, 'sleep', fake_sleep)
+    director._heartbeats_watcher()
+
+    if director._functions_workers_map['fid1']['available_on'] == ['worker-dead']:
+        pytest.xfail('dead-worker eviction does not purge/rebuild stale entries in _functions_workers_map')
+
+
+# --- _select_worker's func_id-specific match still lacks its own case _: (cosmetic only) ---
+
+def test_select_worker_for_func_with_unknown_strategy_raises_via_fallthrough(director):
+    # The func_id-specific match (used when a function is available on more than
+    # one, not-yet-synchronized worker) still has no `case _:` of its own. But an
+    # unmatched `match` is a no-op, not a `return` -- execution falls out of the
+    # `if func_id is not None:` block entirely and into the general match right
+    # below it, which DOES have a `case _:` and raises. Since both matches read
+    # the same self._worker_selection_strategy, this ends up safe in practice:
+    # confirmed here rather than assumed.
+    director._workers = {'worker-1': {}, 'worker-2': {}}
+    director._functions_workers_map['fid1'] = {'available_on': ['worker-1', 'worker-2']}
+    director._worker_selection_strategy = 'Fastest'  # not a real strategy
+
+    with pytest.raises(DirectorConfigError):
+        director._select_worker('fid1')

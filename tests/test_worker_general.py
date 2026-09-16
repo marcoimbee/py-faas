@@ -1,7 +1,11 @@
+from pathlib import Path
+
 import pytest
 
 from pyfaas_worker.app.exceptions import WorkerConfigError
 from pyfaas_worker.app.util.general import read_config_toml
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _valid_toml(**overrides):
@@ -66,3 +70,8 @@ def test_negative_cache_max_size_raises(tmp_path):
 def test_non_positive_heartbeat_interval_raises(tmp_path):
     with pytest.raises(WorkerConfigError):
         read_config_toml(_write(tmp_path, _valid_toml(heartbeat_interval_ms=0)))
+
+
+def test_shipped_worker_config_loads():
+    config = read_config_toml(str(_REPO_ROOT / 'src' / 'pyfaas_worker' / 'worker_config.toml'))
+    assert config['behavior']['caching']['policy'] == 'LRU'

@@ -1,7 +1,11 @@
+from pathlib import Path
+
 import pytest
 
 from pyfaas_director.app.exceptions import DirectorConfigError
 from pyfaas_director.app.util.general import read_config_toml
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _valid_toml(**overrides):
@@ -62,3 +66,8 @@ def test_non_positive_interval_raises(tmp_path, field):
 def test_unknown_worker_selection_strategy_raises(tmp_path):
     with pytest.raises(DirectorConfigError):
         read_config_toml(_write(tmp_path, _valid_toml(worker_selection_strategy='Fastest')))
+
+
+def test_shipped_director_config_loads():
+    config = read_config_toml(str(_REPO_ROOT / 'src' / 'pyfaas_director' / 'director_config.toml'))
+    assert config['workers']['worker_selection_strategy'] == 'Round-Robin'

@@ -1,8 +1,12 @@
 import logging
+from pathlib import Path
 
 import pytest
 
+import pyfaas.pyfaas as pyfaas
 from pyfaas.util.general import read_config_toml, setup_logging
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _write_toml(tmp_path, body):
@@ -65,6 +69,14 @@ log_level = "info"
 """)
     with pytest.raises(Exception):
         read_config_toml(str(path))
+
+
+@pytest.mark.xfail(reason="pyfaas.pyfaas._DEFAULT_CONFIG_FILE_PATH points at 'test/client_config.toml', but "
+                           "neither that file nor a 'test/' directory exists anywhere in the repo, so "
+                           "pyfaas_config() with no file_path always fails with PyFaaSConfigError")
+def test_default_client_config_path_exists():
+    default_path = _REPO_ROOT / pyfaas._DEFAULT_CONFIG_FILE_PATH
+    assert default_path.exists()
 
 
 @pytest.mark.parametrize('level, expected', [

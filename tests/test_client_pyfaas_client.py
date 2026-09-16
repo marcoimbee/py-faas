@@ -62,6 +62,24 @@ def test_send_request_gives_up_after_max_retries(monkeypatch):
     assert client._recreate_socket.call_count == 3
 
 
+def test_send_request_should_not_sleep_after_final_failed_attempt(monkeypatch):
+    # After the 3rd (last) failed attempt, _send_request falls straight through to
+    # `raise zmq.Again` -- no further attempt will ever use that sleep, so it's a
+    # pure wasted delay (up to ~0.6s across the exponential backoff).
+    client = make_client()
+    client._recreate_socket = MagicMock()
+    client._zmq_socket.recv_multipart.side_effect = zmq.Again()
+    sleep_calls = []
+    monkeypatch.setattr('pyfaas.pyfaas_client.pyfaas_client.time.sleep', lambda s: sleep_calls.append(s))
+
+    with pytest.raises(zmq.Again):
+        client._send_request('PING')
+
+    if len(sleep_calls) == 3:
+        pytest.xfail('_send_request sleeps after every failed attempt, including the 3rd and final one, '
+                      'which is guaranteed to be followed only by `raise zmq.Again`')
+
+
 def test_send_request_recovers_after_transient_timeout(monkeypatch):
     client = make_client()
     client._recreate_socket = MagicMock()  # isolate retry/backoff logic from socket-recreation
