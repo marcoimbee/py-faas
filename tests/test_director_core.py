@@ -175,15 +175,15 @@ def test_list_aggregation_merges_results_from_all_workers(director):
     assert 'client-1' not in director._currently_connected_clients
 
 
-# --- known-bug regression: unregister on an unknown func_id crashes the Director (BUG-REPORT #4) ---
+# --- known-bug regressions: an unrecognized func_id crashes the Director instead of erroring gracefully ---
 
 def test_exec_after_unregister_crashes_director(director):
-    # new finding: 'unregister' deletes the func_id -> worker mapping entirely
-    # (pyfaas_director.py, the 'forward_to_client'/'unregister' branch). A later
+    # 'unregister' deletes the func_id -> worker mapping entirely (the
+    # 'forward_to_client'/'unregister' branch of _handle_worker_request). A later
     # 'exec' for that same, now-untracked func_id reaches _select_worker(func_id),
     # which indexes self._functions_workers_map[func_id] without checking it
-    # exists -- same root cause as BUG-REPORT.md #4, but reachable via a normal,
-    # successful unregister rather than an unknown/malformed func_id.
+    # exists -- reachable via a normal, successful unregister followed by exec,
+    # not just a malformed/unknown func_id.
     director._workers = {'worker-1': {}}
     try:
         director._handle_client_request('client-1', {'operation': 'exec', 'func_id': 'never-registered'})
@@ -195,11 +195,13 @@ def test_exec_after_unregister_crashes_director(director):
 
 
 def test_unregister_unknown_func_id_should_not_crash_director(director):
+    # _handle_client_request's 'unregister' branch indexes
+    # self._functions_workers_map[func_id] without checking it exists first.
     director._workers = {'worker-1': {}}
     try:
         director._handle_client_request('client-1', {'operation': 'unregister', 'func_id': 'never-registered'})
     except KeyError:
-        pytest.xfail('BUG-REPORT.md #4: unregister on an unknown func_id raises KeyError and crashes the Director')
+        pytest.xfail('unregister on an unknown func_id raises KeyError and crashes the Director')
 
     payload = sent_payloads(director._zmq_socket)[0]
     assert payload['status'] == 'err'

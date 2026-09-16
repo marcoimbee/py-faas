@@ -275,11 +275,11 @@ def test_exec_cache_hit_returns_cached_result(ops, worker_stub):
     assert response['result'] == 6
 
 
-# --- chain_exec (known to be entirely broken, see BUG-REPORT.md #1) ---
+# --- chain_exec (currently broken end to end) ---
 
-@pytest.mark.xfail(reason='BUG-REPORT.md #1: chain_exec confuses function names with function IDs and calls a '
-                           'nonexistent _check_function_set_registration(), so every chain_exec request raises '
-                           'AttributeError instead of executing the workflow')
+@pytest.mark.xfail(reason='execute_chain_exec_cmd calls a nonexistent self._check_function_set_registration() '
+                           'and then confuses function names with function IDs when indexing self.worker._functions, '
+                           'so every chain_exec request raises AttributeError instead of executing the workflow')
 def test_chain_exec_runs_a_two_function_workflow(ops, worker_stub):
     worker_stub._functions = {
         'fid_add': {'name': 'add', 'code': add, 'registering_client': 'client-1'},
