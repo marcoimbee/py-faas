@@ -209,3 +209,4 @@ worker/worker_dump.bin
 system_test/*
 
 TODO.md
+BUG-REPORT.md

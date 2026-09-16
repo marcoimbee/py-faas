@@ -12,11 +12,11 @@ authors = [
 ]
 license = { text = "MIT" }
 dependencies = [
-    "logging",
     "tomli",
-    "dill"
+    "dill",
+    "pyzmq"
 ]               
-requires-python = ">=3.8"
+requires-python = ">=3.12"
 
 [tool.setuptools.packages.find]
 where = ["src"]

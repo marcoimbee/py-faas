@@ -100,9 +100,9 @@ def validate_return_type_references(func_code, next_func_code, next_func_provide
             # Get type of the parameter in position i
             next_func_registered_positional_arg_type = next_func_registered_positional_args[i][1]
             # Checking type promotion
-            if next_func_registered_positional_arg_type in _type_coercion_table:
-                allowed_types = _type_coercion_table.get(next_func_registered_positional_arg_type)
-                if next_func_provided_positional_args[i] in allowed_types:
+            if next_func_registered_positional_arg_type.__name__ in _type_coercion_table:
+                allowed_types = _type_coercion_table.get(next_func_registered_positional_arg_type.__name__)
+                if func_return_type.__name__ in allowed_types:
                     continue
             # Check if type is equal to func_return_type
             if next_func_registered_positional_arg_type != func_return_type:
@@ -117,9 +117,9 @@ def validate_return_type_references(func_code, next_func_code, next_func_provide
                 next_func_registered_default_arg_type = next_func_registered_default_arg[1]
                 if next_func_registered_default_arg_name == next_func_provided_default_arg_name:    # Found the default arg to check
                     # Checking type promotion
-                    if next_func_registered_default_arg_type in _type_coercion_table:
-                        allowed_types = _type_coercion_table.get(next_func_registered_default_arg_type)
-                        if func_return_type in allowed_types:
+                    if next_func_registered_default_arg_type.__name__ in _type_coercion_table:
+                        allowed_types = _type_coercion_table.get(next_func_registered_default_arg_type.__name__)
+                        if func_return_type.__name__ in allowed_types:
                             continue
                     # Finally checking
                     if next_func_registered_default_arg_type != func_return_type:
@@ -213,3 +213,19 @@ def _is_value_of_type(value, expected_type):
     except TypeError:
         # Handles ForwardRefs or typing objects that aren't real types
         return type(value).__name__ == str(expected_type)
+
+
+if __name__ == '__main__':
+    def produces_int() -> int: pass
+    def wants_float(x: float): pass
+    def wants_str(x: str): pass
+
+    # int -> float is coercible: should not raise
+    validate_return_type_references(produces_int, wants_float, ['$produces_int.output'], {})
+    # int -> str is not coercible and not equal: should raise
+    try:
+        validate_return_type_references(produces_int, wants_str, ['$produces_int.output'], {})
+        raise AssertionError('expected WorkerWorkflowValidationError for int -> str')
+    except WorkerWorkflowValidationError:
+        pass
+    print('worker_side_workflow_validation self-check passed')

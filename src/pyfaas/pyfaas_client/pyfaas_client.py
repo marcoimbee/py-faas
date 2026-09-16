@@ -32,7 +32,7 @@ class PyfaasClient:
 
     def _send_request(self, operation: str, extra_payload: dict = None) -> dict:
         max_retries = 3
-        backoff = 0.2       # seconds
+        backoff = 0.2       # Seconds
         
         payload = {
             'requester': self._client_id,
@@ -53,7 +53,8 @@ class PyfaasClient:
                 self._logger.warning(f"Timeout on '{operation}', attempt {attempt+1}/{max_retries}")
                 self._recreate_socket()
                 time.sleep(backoff)
-                backoff *= 2  # exponential backoff
+                backoff *= 2  # Exponential backoff
+        raise zmq.Again     # Avoid returning none after all the retries
     
     def _recreate_socket(self) -> None:
         try:

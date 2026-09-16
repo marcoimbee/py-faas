@@ -235,7 +235,7 @@ class PyfaasDirector:
                     self._logger.debug(f'Currently active workers: {active_worker_ids}')
                     get_worker_ids_response = {
                         'status': 'ok',
-                        'result': active_worker_ids,
+                        'result': list(active_worker_ids),
                     }
 
                     # Director self-responds to requester client without contacting any worker
@@ -326,16 +326,16 @@ class PyfaasDirector:
 
                         self._forward_client_req_single_worker(client_id, selected_worker_id, json_payload)
                     else:   # Unsynchronized Workers
-                        # Here it is a  bit more of a mess
+                        # TODO: here it is a  bit more of a mess
                         # We could do like this:
                         # we create a dedicated queue for the chained execution requests.
                         # We pre-fill the queue with the messages that need to be sent to the Workers, 
                         # minus the field containing the serialized result from the previous function execution.
                         # We send the first message, we wait for the response of the first Worker. If OK, embed result
-                        # ini the following msg in the queue, and send to another Worker. If not OK at any point, return the error
+                        # in the following msg in the queue, and send to another Worker. If not OK at any point, return the error
                         # to the user.
                         # When the queue is empty, the workflow functions have finished, and the result is delivered back to the user.
-                        
+
                         pass
 
                 case 'list':
@@ -411,12 +411,13 @@ class PyfaasDirector:
 
                 case _:         # Any other case: any connected worker can handle the request
                     selected_worker_id = self._select_worker()
+                    self._forward_client_req_single_worker(client_id, selected_worker_id, json_payload)
 
         except DirectorNoAvailableWorkersError as e:            # Raised by _select_worker() if no Workers are available/registered
             self._logger.warning('No available Workers to handle client request right now')
             err_response = {
                 'status': 'err',
-                'message': e
+                'message': str(e)
             }
             msg = [client_id.encode(), b'', json.dumps(err_response).encode()]
             self._zmq_socket.send_multipart(msg)
@@ -547,7 +548,7 @@ class PyfaasDirector:
                             # Can now aggregate the response(s)
                             # If any response produced an error, forward the first error response
                             # Otherwise, build a custom JSON payload with the list of all the received function IDs and names
-                            print(self._worker_list_cmd_responses)
+                            self._logger.debug(self._worker_list_cmd_responses)
                             destination_client_id = next(
                                 r['destination_client'] for r in self._worker_list_cmd_responses
                                 if uuid.UUID(r['message_id']) == request_id
@@ -832,7 +833,7 @@ class PyfaasDirector:
                     continue
                 calls = int(stats.get('#calls', 0))     # Safe extraction with defaults
                 tot_exec = float(stats.get('tot_exec_time', 0.0))
-                avg_exec = float(stats.get('avg_exec_time'))
+                avg_exec = float(stats.get('avg_exec_time', 0.0) or 0.0)
 
                 acc[func_id]['calls_sum'] += calls
                 acc[func_id]['tot_exec_sum'] += tot_exec

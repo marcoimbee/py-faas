@@ -493,7 +493,7 @@ class WorkerOperations:
             response = [b'', json.dumps(client_json_response).encode()]
             self.worker._outgoing_tx_queue.put(response)
 
-        except WorkerChainedExecutionError as e:
+        except (WorkerChainedExecutionError, WorkerFunctionExecutionError) as e:
             self.worker._logger.error(f"Error while executing workflow '{workflow_id}': {e}")
             client_json_response = self._build_JSON_response(
                 message_id=str(uuid.uuid4()),
@@ -515,6 +515,8 @@ class WorkerOperations:
 
         func_id = json_payload['func_id']
         client_json_response = None
+
+        func_name = None
 
         if func_id in self.worker._functions:       # The function exists
             # Only the client that registered the function is able to unregister it
@@ -567,7 +569,7 @@ class WorkerOperations:
         response = [b'', json.dumps(client_json_response).encode()]
         self.worker._outgoing_tx_queue.put(response)
 
-        self.worker._logger.info(f"Unregistration procedure for '{func_name}' terminated without errors")
+        self.worker._logger.info(f"Unregistration procedure for '{func_id}' terminated without errors")
 
     def _execute_function(self, func_id: str, func_positional_args: list, func_default_args: dict, save_in_cache: bool) -> None:
         func_name = self.worker._functions[func_id]['name']
@@ -591,8 +593,8 @@ class WorkerOperations:
                             func_positional_args,
                             func_default_args
                         )
-                    self._logger.info(f"Got cached result: '{func_res}' for '{func_name}'")
-                    self._file_logger.log('INFO', 'Cache hit')
+                    self.worker._logger.info(f"Got cached result: '{func_res}' for '{func_name}'")
+                    self.worker._file_logger.log('INFO', 'Cache hit')
                     return func_res
                 except WorkerFunctionCacheError as e:
                     self._logger.error(f'Exception while fetching result from cache: {e}')
