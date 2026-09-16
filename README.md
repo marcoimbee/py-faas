@@ -41,7 +41,7 @@ This is a personal and experimental project and currently lacks proper sandboxin
 
 ### Requirements
 
-At least `Python v3.8` is required for using this library.
+At least `Python 3.12` is required for using this library.
 
 ### Installation
 
