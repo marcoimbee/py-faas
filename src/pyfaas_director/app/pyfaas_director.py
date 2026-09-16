@@ -16,7 +16,7 @@ from collections import defaultdict
 from pathlib import Path
 from pyfaas_director.app.util import general
 from pyfaas_director.app.util.file_logger import FileLogger
-from pyfaas_director.app.exceptions import DirectorCleanupError, DirectorNoAvailableWorkersError, DirectorWorkflowValidationError
+from pyfaas_director.app.exceptions import DirectorCleanupError, DirectorNoAvailableWorkersError, DirectorWorkflowValidationError, DirectorConfigError
 
 
 _DEFAULT_TOML_CONFIG_FILE = 'pyfaas_director/director_config.toml'
@@ -480,6 +480,8 @@ class PyfaasDirector:
             case 'Random':
                 worker_id, _ = random.choice(list(self._workers.items()))
                 return worker_id
+            case _:
+                raise DirectorConfigError('Unknown worker selection strategy')
 
     def _handle_worker_request(self, worker_id: str, json_payload: dict) -> None:
         operation = json_payload.get('operation')
