@@ -36,12 +36,6 @@ class PyfaasWorker:
 
         self._config = config
 
-        # TODO: test
-        # self._exec_limits = {}
-        # self._exec_limits['cpu_time_s'] = resource.RLIM_INFINITY if self._config['behavior']['exec_limits']['cpu_time_limit'] == 0 else self._config['behavior']['exec_limits']['cpu_time_limit']
-        # self._exec_limits['address_space_mb'] = resource.RLIM_INFINITY if self._config['behavior']['exec_limits']['address_space_limit_mb'] == 0 else self._config['behavior']['exec_limits']['address_space_limit_mb']
-        # self._logger.debug(f'Execution limits: {self._exec_limits['cpu_time_s']} s (CPU time), {self._exec_limits['address_space_mb']} MB (address space)')
-
         self._director_host = self._config['network']['director_ip_addr']
         self._director_port = self._config['network']['director_port']
         self._hearbeat_interval_ms = self._config['network']['heartbeat_interval_ms']

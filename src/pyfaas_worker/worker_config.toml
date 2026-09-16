@@ -14,10 +14,6 @@ shutdown_persistence = false
 policy = "LRU"
 max_size = 0
 
-# [behavior.exec_limits]
-# cpu_time_limit_s = 5
-# address_space_limit_mb = 100
-
 [logging]
 log_level = "debug"
 log_directory = "pyfaas_worker/logs"

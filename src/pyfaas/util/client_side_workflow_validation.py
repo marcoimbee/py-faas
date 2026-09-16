@@ -3,7 +3,7 @@ from pyfaas.exceptions import PyFaaSWorkflowValidationError
 
 # Validates the workflow structurally. Type checks will then be performed worker-side.
 # No need to send this to the worker if it's malformed.
-# This just tells of the structure of the workflow is correct
+# This just tells if the structure of the workflow is correct
 # Expected sample structure:
 # {
 #     "entry_function": "add",

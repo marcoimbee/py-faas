@@ -33,17 +33,6 @@ def read_config_toml(path: str) -> dict:
     # Checking shutdown persistence fields
     if config['behavior']['shutdown_persistence'] is True and config['behavior']['dump_file'] is None:
         raise WorkerConfigError(f"Config error: field 'shutdown_persistence' set to true but no field 'dump_file' was specified")
-    
-    # # TODO: test
-    # # Checking execution limits fields
-    # if config['behavior']['exec_limits']['cpu_time_limit'] is not None and config['behavior']['exec_limits']['cpu_time_limit'] <= 0:
-    #     raise WorkerConfigError(f"Config error: invalid value filed value for 'cpu_time_limit'. A positive integer is needed, {config['behavior']['exec_limits']['cpu_time_limit']} was provided")
-    # if config['behavior']['exec_limits']['cpu_time_limit'] is None:
-    #     config['behavior']['exec_limits']['cpu_time_limit'] = 0             # Will be set to max in Worker
-    # if config['behavior']['exec_limits']['address_space_limit_mb'] is not None and config['behavior']['exec_limits']['address_space_limit_mb'] <= 0:
-    #     raise WorkerConfigError(f"Config error: invalid value filed value for 'address_space_limit_mb'. A positive integer is needed, {config['behavior']['exec_limits']['address_space_limit_mb']} was provided")
-    # if config['behavior']['exec_limits']['address_space_limit_mb'] is None:
-    #     config['behavior']['exec_limits']['address_space_limit_mb'] = 0     # Will be set to max in Worker
 
     return config
 

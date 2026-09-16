@@ -6,9 +6,6 @@ import base64
 import dill
 import inspect
 import time
-import multiprocessing
-import signal
-import sys
 import uuid
 
 from pyfaas_worker.app.exceptions import *
@@ -681,24 +678,3 @@ class WorkerOperations:
             func_result_bytes = dill.dumps(func_result)
             func_result_base64 = base64.b64encode(func_result_bytes).decode()
             return func_result_base64, 'pickle_base64'
-
-    # def _check_function_set_registration(self, function_set: list[str]) -> tuple[bool, str | None]:
-    #     for func in function_set:
-    #         if func not in self.worker._functions:
-    #             return False, func
-    #     return True, None
-
-    # TODO:
-    # # Runs inside the child process
-    # def _sandbox_function_execution(self):
-    #     try:
-    #         # Applying limits
-            
-    #         # CPU time limit
-    #         resource.setrlimit(resource.RLIMIT_CPU, (self.worker._exec_limits['cpu_time_s'], self._exec_limits['cpu_time_s']))
-            
-    #         # Address space limit (memory)
-    #         mem_limit_bytes = self._exec_limits['address_space_mb'] * 1024 * 1024
-    #         resource.setrlimit(resource.RLIMIT_AS, (mem_limit_bytes, mem_limit_bytes))
-
-    #         # TODO:
