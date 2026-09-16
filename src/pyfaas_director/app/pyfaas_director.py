@@ -204,6 +204,19 @@ class PyfaasDirector:
                     request_id = uuid.uuid4()
 
                     func_id = json_payload['func_id']       # Needed to know to which Worker(s) (one/more) to send the unregistration request
+                    if func_id not in self._functions_workers_map:
+                        err_msg = f"No function is identified by ID '{func_id}'"
+                        self._logger.debug(err_msg)
+                        err_response = {
+                            'status': 'err',
+                            'message': err_msg
+                        }
+                        msg = [client_id.encode(), b'', json.dumps(err_response).encode()]
+                        self._zmq_socket.send_multipart(msg)
+                        with self._lock:
+                            self._currently_connected_clients.remove(client_id)
+                        return
+
                     if self._functions_workers_map[func_id]['available_on'] != 'ANY':
                         selected_worker_ids = self._functions_workers_map[func_id]['available_on']   # Get Worker ID, but not all of them
                     else:
@@ -523,7 +536,7 @@ class PyfaasDirector:
                             if json_payload['status'] != 'err':
                                 # Update function-worker mapping data structure, deleting the entry
                                 func_id = self._pending_multiple_responses[request_id]['additional_needed_data']['func_id']
-                                del self._functions_workers_map[func_id]
+                                self._functions_workers_map.pop(func_id, None)
 
                             # Can finally delete the pending messages entry
                             del self._pending_multiple_responses[request_id]

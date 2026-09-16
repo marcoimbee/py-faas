@@ -175,7 +175,7 @@ def test_list_aggregation_merges_results_from_all_workers(director):
     assert 'client-1' not in director._currently_connected_clients
 
 
-# --- known-bug regressions: an unrecognized func_id crashes the Director instead of erroring gracefully ---
+# --- known-bug regression: an unrecognized func_id crashes the Director instead of erroring gracefully ---
 
 def test_exec_after_unregister_crashes_director(director):
     # 'unregister' deletes the func_id -> worker mapping entirely (the
@@ -194,17 +194,15 @@ def test_exec_after_unregister_crashes_director(director):
     assert payload['status'] == 'err'
 
 
-def test_unregister_unknown_func_id_should_not_crash_director(director):
-    # _handle_client_request's 'unregister' branch indexes
-    # self._functions_workers_map[func_id] without checking it exists first.
+# --- unregister on an unknown func_id: fixed ---
+
+def test_unregister_unknown_func_id_returns_err(director):
     director._workers = {'worker-1': {}}
-    try:
-        director._handle_client_request('client-1', {'operation': 'unregister', 'func_id': 'never-registered'})
-    except KeyError:
-        pytest.xfail('unregister on an unknown func_id raises KeyError and crashes the Director')
+    director._handle_client_request('client-1', {'operation': 'unregister', 'func_id': 'never-registered'})
 
     payload = sent_payloads(director._zmq_socket)[0]
     assert payload['status'] == 'err'
+    assert 'client-1' not in director._currently_connected_clients
 
 
 # --- heartbeat eviction ---
