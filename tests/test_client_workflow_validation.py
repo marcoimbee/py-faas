@@ -124,6 +124,14 @@ def test_bad_positional_arg_reference_raises():
         validate_json_workflow_structure(wf)
 
 
+def test_empty_function_name_raises():
+    wf = _base_workflow()
+    wf['functions'][''] = wf['functions'].pop('multiply')
+    wf['functions']['add']['next'] = ''
+    with pytest.raises(PyFaaSWorkflowValidationError, match='Empty function name'):
+        validate_json_workflow_structure(wf)
+
+
 def test_bad_default_arg_reference_raises():
     wf = _base_workflow()
     wf['functions']['multiply']['default_args'] = {'c': '$ghost.output'}

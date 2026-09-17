@@ -16,6 +16,7 @@ def make_client():
     client._director_ip_addr = '127.0.0.1'
     client._director_port = 40000
     client._receive_timeout_ms = 1000
+    client._max_request_retries = 3
     client._zmq_context = MagicMock()
     client._zmq_socket = MagicMock()
     return client
@@ -127,6 +128,124 @@ def test_pyfaas_register_encodes_function_and_sends_it():
     sent_payload = json.loads(sent_msg[1].decode())
     decoded_func = dill.loads(base64.b64decode(sent_payload['serialized_func_base64']))
     assert decoded_func(2, 3) == 5
+
+
+def test_init_sets_socket_options_and_connects(monkeypatch):
+    fake_context = MagicMock()
+    fake_socket = MagicMock()
+    fake_context.socket.return_value = fake_socket
+    monkeypatch.setattr('pyfaas.pyfaas_client.pyfaas_client.zmq.Context', lambda: fake_context)
+
+    client = PyfaasClient('127.0.0.1', 40000, receive_timeout_s=5)
+
+    assert client._zmq_socket is fake_socket
+    fake_socket.setsockopt.assert_any_call(zmq.IDENTITY, client._client_id.encode())
+    fake_socket.setsockopt.assert_any_call(zmq.RCVTIMEO, 5000)
+    fake_socket.setsockopt.assert_any_call(zmq.LINGER, 0)
+    fake_socket.connect.assert_called_once_with('tcp://127.0.0.1:40000')
+
+
+def test_pyfaas_unregister_payload_shape():
+    client = make_client()
+    queue_response(client._zmq_socket, {'status': 'ok'})
+
+    client.pyfaas_unregister('fid-1')
+
+    sent_payload = json.loads(client._zmq_socket.send_multipart.call_args[0][0][1].decode())
+    assert sent_payload['operation'] == 'unregister'
+    assert sent_payload['func_id'] == 'fid-1'
+
+
+def test_pyfaas_get_stats_payload_shape():
+    client = make_client()
+    queue_response(client._zmq_socket, {'status': 'ok'})
+
+    client.pyfaas_get_stats()
+
+    sent_payload = json.loads(client._zmq_socket.send_multipart.call_args[0][0][1].decode())
+    assert sent_payload['operation'] == 'get_stats'
+
+
+def test_pyfaas_list_payload_shape():
+    client = make_client()
+    queue_response(client._zmq_socket, {'status': 'ok'})
+
+    client.pyfaas_list()
+
+    sent_payload = json.loads(client._zmq_socket.send_multipart.call_args[0][0][1].decode())
+    assert sent_payload['operation'] == 'list'
+
+
+def test_pyfaas_get_worker_info_payload_shape():
+    client = make_client()
+    queue_response(client._zmq_socket, {'status': 'ok'})
+
+    client.pyfaas_get_worker_info('worker-1')
+
+    sent_payload = json.loads(client._zmq_socket.send_multipart.call_args[0][0][1].decode())
+    assert sent_payload['operation'] == 'get_worker_info'
+    assert sent_payload['worker_id'] == 'worker-1'
+
+
+def test_pyfaas_get_cache_dump_payload_shape():
+    client = make_client()
+    queue_response(client._zmq_socket, {'status': 'ok'})
+
+    client.pyfaas_get_cache_dump('worker-1')
+
+    sent_payload = json.loads(client._zmq_socket.send_multipart.call_args[0][0][1].decode())
+    assert sent_payload['operation'] == 'get_cache_dump'
+    assert sent_payload['worker_id'] == 'worker-1'
+
+
+def test_pyfaas_chain_exec_payload_shape():
+    client = make_client()
+    queue_response(client._zmq_socket, {'status': 'ok'})
+    workflow = {'id': 'wf1'}
+
+    client.pyfaas_chain_exec(workflow)
+
+    sent_payload = json.loads(client._zmq_socket.send_multipart.call_args[0][0][1].decode())
+    assert sent_payload['operation'] == 'chain_exec'
+    assert sent_payload['json_workflow'] == workflow
+
+
+def test_pyfaas_get_worker_ids_payload_shape():
+    client = make_client()
+    queue_response(client._zmq_socket, {'status': 'ok'})
+
+    client.pyfaas_get_worker_ids()
+
+    sent_payload = json.loads(client._zmq_socket.send_multipart.call_args[0][0][1].decode())
+    assert sent_payload['operation'] == 'get_worker_ids'
+
+
+def test_pyfaas_ping_payload_shape():
+    client = make_client()
+    queue_response(client._zmq_socket, {'status': 'ok'})
+
+    client.pyfaas_ping()
+
+    sent_payload = json.loads(client._zmq_socket.send_multipart.call_args[0][0][1].decode())
+    assert sent_payload['operation'] == 'PING'
+
+
+def test_recreate_socket_skips_closing_already_closed_socket():
+    client = make_client()
+    old_socket = client._zmq_socket
+    old_socket.closed = True
+
+    client._recreate_socket()
+
+    old_socket.close.assert_not_called()
+
+
+def test_recreate_socket_reraises_on_failure():
+    client = make_client()
+    client._zmq_context.socket.side_effect = Exception('boom')
+
+    with pytest.raises(Exception, match='boom'):
+        client._recreate_socket()
 
 
 def test_pyfaas_exec_payload_shape():

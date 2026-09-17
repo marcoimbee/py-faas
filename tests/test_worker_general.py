@@ -1,9 +1,10 @@
+import logging
 from pathlib import Path
 
 import pytest
 
 from pyfaas_worker.app.exceptions import WorkerConfigError
-from pyfaas_worker.app.util.general import read_config_toml
+from pyfaas_worker.app.util.general import read_config_toml, setup_logging
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -75,3 +76,25 @@ def test_non_positive_heartbeat_interval_raises(tmp_path):
 def test_shipped_worker_config_loads():
     config = read_config_toml(str(_REPO_ROOT / 'src' / 'pyfaas_worker' / 'worker_config.toml'))
     assert config['behavior']['caching']['policy'] == 'LRU'
+
+
+def test_shutdown_persistence_true_with_empty_dump_file_is_not_rejected(tmp_path):
+    # The guard only checks 'dump_file' against None, but TOML has no null literal --
+    # an empty string can never equal None, so this slips past validation even though
+    # it leaves shutdown persistence pointed at an unusable empty path.
+    config = read_config_toml(_write(tmp_path, _valid_toml(shutdown_persistence='true', dump_file='""')))
+    assert config['behavior']['dump_file'] == ''
+
+
+@pytest.mark.parametrize('level, expected', [
+    ('debug', logging.DEBUG),
+    ('info', logging.INFO),
+    ('warning', logging.WARNING),
+    ('error', logging.ERROR),
+    ('critical', logging.CRITICAL),
+    ('fatal', logging.FATAL),
+    ('unknown-level', logging.INFO),  # falls back to INFO
+])
+def test_setup_logging_sets_root_level(level, expected):
+    setup_logging(level)
+    assert logging.getLogger().level == expected

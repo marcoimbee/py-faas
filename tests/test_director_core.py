@@ -1,5 +1,6 @@
 import datetime
 import json
+import threading
 import time
 from unittest.mock import MagicMock
 
@@ -344,6 +345,286 @@ def test_dead_worker_removal_should_clean_up_functions_workers_map(director, mon
 
     if director._functions_workers_map['fid1']['available_on'] == ['worker-dead']:
         pytest.xfail('dead-worker eviction does not purge/rebuild stale entries in _functions_workers_map')
+
+
+# --- known-bug regression: re-registering a function overwrites its existing availability ---
+
+def test_reregistering_function_should_not_discard_existing_availability(director):
+    # func_id is deterministic (sha256 of name+code), so registering the exact same
+    # function twice produces the same func_id. The 'register' case unconditionally
+    # overwrites _functions_workers_map[func_id], discarding a prior 'ANY' (fully
+    # synchronized) or multi-worker availability list in favor of a single,
+    # newly-selected worker -- even though every other worker still has the function.
+    import base64
+    import dill
+
+    def add(a: int, b: int) -> int:
+        return a + b
+
+    func_code_base64 = base64.b64encode(dill.dumps(add)).decode('utf-8')
+    func_id = director._compute_function_id('add', func_code_base64)
+    director._functions_workers_map[func_id] = {
+        'func_name': 'add', 'registering_client': 'client-1', 'available_on': 'ANY',
+    }
+    director._workers = {'worker-1': {}, 'worker-2': {}}
+
+    director._handle_client_request('client-1', {
+        'operation': 'register', 'serialized_func_base64': func_code_base64,
+    })
+
+    if director._functions_workers_map[func_id]['available_on'] != 'ANY':
+        pytest.xfail("re-registering an already-registered function overwrites 'available_on', "
+                      "discarding the fact that it was already available on every worker")
+
+
+# --- _handle_client_request: register (happy path) ---
+
+def test_register_stores_function_mapping_and_forwards_to_worker(director):
+    import base64
+    import dill
+
+    def add(a: int, b: int) -> int:
+        return a + b
+
+    director._workers = {'worker-1': {}}
+    func_code_base64 = base64.b64encode(dill.dumps(add)).decode('utf-8')
+
+    director._handle_client_request('client-1', {
+        'operation': 'register', 'serialized_func_base64': func_code_base64,
+    })
+
+    func_id = director._compute_function_id('add', func_code_base64)
+    assert director._functions_workers_map[func_id]['available_on'] == ['worker-1']
+    assert director._functions_workers_map[func_id]['registering_client'] == 'client-1'
+    assert director._workers_are_synchronized is False
+
+    forwarded_payload = sent_payloads(director._zmq_socket)[0]
+    assert forwarded_payload['func_id'] == func_id
+
+
+# --- _handle_client_request: unregister with available_on == 'ANY' / multiple workers ---
+
+def test_unregister_when_available_on_any_contacts_every_worker(director):
+    director._workers = {'worker-1': {}, 'worker-2': {}, 'worker-3': {}}
+    director._functions_workers_map['fid1'] = {
+        'func_name': 'add', 'registering_client': 'client-1', 'available_on': 'ANY',
+    }
+
+    director._handle_client_request('client-1', {'operation': 'unregister', 'func_id': 'fid1'})
+
+    assert director._zmq_socket.send_multipart.call_count == 3
+    request_id = next(iter(director._pending_multiple_responses))
+    assert director._pending_multiple_responses[request_id]['remaining'] == 3
+
+
+def test_unregister_with_no_available_workers_raises_no_available_workers_error(director):
+    director._functions_workers_map['fid1'] = {
+        'func_name': 'add', 'registering_client': 'client-1', 'available_on': [],
+    }
+
+    director._handle_client_request('client-1', {'operation': 'unregister', 'func_id': 'fid1'})
+
+    payload = sent_payloads(director._zmq_socket)[0]
+    assert payload['status'] == 'err'
+    assert 'client-1' not in director._currently_connected_clients
+
+
+# --- _handle_client_request: chain_exec missing-function detection ---
+
+def test_chain_exec_with_unregistered_function_returns_err(director):
+    director._workers = {'worker-1': {}}
+    director._functions_workers_map['fid1'] = {
+        'func_name': 'add', 'registering_client': 'client-1', 'available_on': ['worker-1'],
+    }
+    workflow = {
+        'id': 'wf1', 'entry_function': 'multiply',
+        'functions': {'multiply': {'positional_args': [], 'default_args': {}, 'next': '', 'cache_result': False}},
+    }
+
+    director._handle_client_request('client-1', {'operation': 'chain_exec', 'json_workflow': workflow})
+
+    payload = sent_payloads(director._zmq_socket)[0]
+    assert payload['status'] == 'err'
+    assert 'multiply' in payload['message']
+    assert 'client-1' not in director._currently_connected_clients
+
+
+def test_chain_exec_synchronized_single_worker_forwards_once(director):
+    director._workers = {'worker-1': {}}
+    director._functions_workers_map['fid1'] = {
+        'func_name': 'add', 'registering_client': 'client-1', 'available_on': ['worker-1'],
+    }
+    workflow = {
+        'id': 'wf1', 'entry_function': 'add',
+        'functions': {'add': {'positional_args': [], 'default_args': {}, 'next': '', 'cache_result': False}},
+    }
+
+    director._handle_client_request('client-1', {'operation': 'chain_exec', 'json_workflow': workflow})
+
+    assert director._zmq_socket.send_multipart.call_count == 1
+    forwarded_payload = sent_payloads(director._zmq_socket)[0]
+    assert forwarded_payload['operation'] == 'chain_exec'
+
+
+# --- _handle_client_request: list / get_stats client dispatch ---
+
+def test_list_single_worker_forwards_once(director):
+    director._workers = {'worker-1': {}}
+    director._handle_client_request('client-1', {'operation': 'list'})
+    assert director._zmq_socket.send_multipart.call_count == 1
+
+
+def test_list_unsynchronized_multiple_workers_contacts_every_worker(director):
+    director._workers = {'worker-1': {}, 'worker-2': {}}
+    director._workers_are_synchronized = False
+    director._handle_client_request('client-1', {'operation': 'list'})
+    assert director._zmq_socket.send_multipart.call_count == 2
+
+
+def test_get_stats_single_worker_forwards_once(director):
+    director._workers = {'worker-1': {}}
+    director._handle_client_request('client-1', {'operation': 'get_stats'})
+    assert director._zmq_socket.send_multipart.call_count == 1
+
+
+def test_get_stats_multiple_workers_contacts_every_worker(director):
+    director._workers = {'worker-1': {}, 'worker-2': {}}
+    director._handle_client_request('client-1', {'operation': 'get_stats'})
+    assert director._zmq_socket.send_multipart.call_count == 2
+
+
+# --- _handle_worker_request: forward_to_client aggregation for 'get_stats' ---
+
+def test_get_stats_aggregation_merges_results_from_all_workers(director):
+    import uuid
+    request_id = uuid.uuid4()
+    director._currently_connected_clients = ['client-1']
+    director._pending_multiple_responses[request_id] = {
+        'client_id': 'client-1', 'remaining': 2, 'additional_needed_data': {},
+    }
+
+    director._handle_worker_request('worker-1', {
+        'operation': 'forward_to_client', 'original_client_operation': 'get_stats',
+        'message_id': str(request_id), 'destination_client': 'client-1',
+        'status': 'ok', 'result': {'fid1': {'#calls': 2, 'tot_exec_time': 1.0, 'avg_exec_time': 0.5}},
+    })
+    director._handle_worker_request('worker-2', {
+        'operation': 'forward_to_client', 'original_client_operation': 'get_stats',
+        'message_id': str(request_id), 'destination_client': 'client-1',
+        'status': 'ok', 'result': {'fid1': {'#calls': 3, 'tot_exec_time': 3.0, 'avg_exec_time': 1.0}},
+    })
+
+    payload = sent_payloads(director._zmq_socket)[0]
+    assert payload['status'] == 'ok'
+    assert payload['result']['fid1']['#calls'] == 5
+    assert 'client-1' not in director._currently_connected_clients
+
+
+def test_get_stats_aggregation_forwards_first_error_on_worker_failure(director):
+    import uuid
+    request_id = uuid.uuid4()
+    director._currently_connected_clients = ['client-1']
+    director._pending_multiple_responses[request_id] = {
+        'client_id': 'client-1', 'remaining': 2, 'additional_needed_data': {},
+    }
+
+    director._handle_worker_request('worker-1', {
+        'operation': 'forward_to_client', 'original_client_operation': 'get_stats',
+        'message_id': str(request_id), 'destination_client': 'client-1',
+        'status': 'err', 'message': 'boom',
+    })
+    director._handle_worker_request('worker-2', {
+        'operation': 'forward_to_client', 'original_client_operation': 'get_stats',
+        'message_id': str(request_id), 'destination_client': 'client-1',
+        'status': 'ok', 'result': {},
+    })
+
+    payload = sent_payloads(director._zmq_socket)[0]
+    assert payload['status'] == 'err'
+    assert payload['message'] == 'boom'
+
+
+# --- _handle_worker_request: unregister aggregation happy path (all workers agree) ---
+
+def test_unregister_aggregation_all_ok_removes_func_id(director):
+    import uuid
+    request_id = uuid.uuid4()
+    func_id = 'fid1'
+    director._currently_connected_clients = ['client-1']
+    director._functions_workers_map[func_id] = {
+        'func_name': 'add', 'registering_client': 'client-1', 'available_on': ['worker-1', 'worker-2'],
+    }
+    director._pending_multiple_responses[request_id] = {
+        'client_id': 'client-1', 'remaining': 2, 'additional_needed_data': {'func_id': func_id},
+    }
+
+    director._handle_worker_request('worker-1', {
+        'operation': 'forward_to_client', 'original_client_operation': 'unregister',
+        'message_id': str(request_id), 'destination_client': 'client-1', 'status': 'ok',
+    })
+    director._handle_worker_request('worker-2', {
+        'operation': 'forward_to_client', 'original_client_operation': 'unregister',
+        'message_id': str(request_id), 'destination_client': 'client-1', 'status': 'ok',
+    })
+
+    assert func_id not in director._functions_workers_map
+    assert 'client-1' not in director._currently_connected_clients
+
+
+# --- _synchronize_workers skip conditions ---
+
+@pytest.mark.parametrize('setup', [
+    lambda d: d._workers.update({'worker-1': {}}),  # only 1 worker
+    lambda d: (d._workers.update({'worker-1': {}, 'worker-2': {}}), d._currently_connected_clients.append('client-1')),
+    lambda d: (d._workers.update({'worker-1': {}, 'worker-2': {}}), setattr(d, '_workers_are_synchronized', True)),
+])
+def test_synchronize_workers_skips_when_conditions_not_met(director, monkeypatch, setup):
+    setup(director)
+
+    def fake_sleep(_):
+        director._threading_stop_event.set()
+
+    monkeypatch.setattr(time, 'sleep', fake_sleep)
+    director._synchronize_workers()
+
+    assert director._zmq_socket.send_multipart.call_count == 0
+
+
+def test_synchronize_workers_runs_full_sync_across_two_workers(director, monkeypatch):
+    director._workers = {'worker-1': {}, 'worker-2': {}}
+    director._functions_workers_map['fid1'] = {
+        'func_name': 'add', 'registering_client': 'client-1', 'available_on': ['worker-1'],
+    }
+
+    sleep_calls = {'n': 0}
+
+    def fake_sleep(_):
+        sleep_calls['n'] += 1
+        if sleep_calls['n'] > 1:
+            director._threading_stop_event.set()
+
+    monkeypatch.setattr(time, 'sleep', fake_sleep)
+
+    def run_sync():
+        director._synchronize_workers()
+
+    sync_thread = threading.Thread(target=run_sync, daemon=True)
+    sync_thread.start()
+
+    # Respond to the state-request broadcast: worker-1 has fid1, worker-2 doesn't
+    deadline = time.time() + 2
+    while director._zmq_socket.send_multipart.call_count < 2 and time.time() < deadline:
+        time.sleep(0.01)
+    director._incoming_synchronization_msg_queue.put(['worker-1', {'functions': ['fid1']}])
+    director._incoming_synchronization_msg_queue.put(['worker-2', {'functions': []}])
+
+    # Respond to the function-code request for fid1 (worker-1 has it)
+    director._incoming_synchronization_func_code_msg_queue.put({'func_id': 'fid1', 'serialized_func_base64': 'x'})
+
+    sync_thread.join(timeout=2)
+
+    assert director._functions_workers_map['fid1']['available_on'] == 'ANY'
+    assert director._workers_are_synchronized is True
 
 
 # --- _select_worker's func_id-specific match still lacks its own case _: (cosmetic only) ---

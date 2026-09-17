@@ -71,9 +71,6 @@ log_level = "info"
         read_config_toml(str(path))
 
 
-@pytest.mark.xfail(reason="pyfaas.pyfaas._DEFAULT_CONFIG_FILE_PATH points at 'test/client_config.toml', but "
-                           "neither that file nor a 'test/' directory exists anywhere in the repo, so "
-                           "pyfaas_config() with no file_path always fails with PyFaaSConfigError")
 def test_default_client_config_path_exists():
     default_path = _REPO_ROOT / pyfaas._DEFAULT_CONFIG_FILE_PATH
     assert default_path.exists()
@@ -85,8 +82,18 @@ def test_default_client_config_path_exists():
     ('warning', logging.WARNING),
     ('error', logging.ERROR),
     ('critical', logging.CRITICAL),
+    ('fatal', logging.FATAL),
     ('unknown-level', logging.INFO),  # falls back to INFO
 ])
 def test_setup_logging_sets_root_level(level, expected):
     setup_logging(level)
     assert logging.getLogger().level == expected
+
+
+def test_setup_logging_empty_string_leaves_level_unchanged():
+    # Unlike every other branch, '' maps to log_level=None, and basicConfig(level=None, ...)
+    # leaves the root logger's current level untouched instead of setting a level at all.
+    setup_logging('debug')
+    assert logging.getLogger().level == logging.DEBUG
+    setup_logging('')
+    assert logging.getLogger().level == logging.DEBUG

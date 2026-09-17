@@ -8,6 +8,7 @@ def test_disabled_cache_is_a_no_op():
     cache.add('f1', [1], {}, 'result')
     assert cache.check_cached('f1', [1], {}) is False
     assert cache.get_cache_dump() == {'cache_policy': 'LRU', 'max_size': 0, 'cache': {}}
+    assert cache.get_cached_result('f1', [1], {}) is None
 
 
 def test_add_and_retrieve_round_trip():
@@ -82,3 +83,14 @@ def test_get_cache_dump_reports_entries():
         'func_default_args': {'c': 2},
         'func_result': 'result',
     }
+
+
+def test_get_cache_dump_reports_multiple_entries():
+    cache = WorkerFunctionExecutionCache('LRU', max_size=5)
+    cache.add('A', [1], {}, 'result-a')
+    cache.add('B', [2], {}, 'result-b')
+
+    dump = cache.get_cache_dump()
+
+    results = {entry['func_id']: entry['func_result'] for entry in dump['cache'].values()}
+    assert results == {'A': 'result-a', 'B': 'result-b'}

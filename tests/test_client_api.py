@@ -1,5 +1,6 @@
 import base64
 import json
+from unittest.mock import MagicMock
 
 import dill
 import pytest
@@ -55,6 +56,55 @@ def test_unconfigured_calls_raise_runtime_error(monkeypatch):
         pyfaas.pyfaas_list()
     with pytest.raises(RuntimeError):
         pyfaas.pyfaas_exec('id', [])
+
+
+@pytest.mark.parametrize('call', [
+    lambda: pyfaas.pyfaas_register(lambda: None),
+    lambda: pyfaas.pyfaas_unregister('fid'),
+    lambda: pyfaas.pyfaas_get_stats(),
+    lambda: pyfaas.pyfaas_get_worker_info('worker-1'),
+    lambda: pyfaas.pyfaas_get_cache_dump('worker-1'),
+    lambda: pyfaas.pyfaas_load_workflow('wf.json'),
+    lambda: pyfaas.pyfaas_chain_exec({'id': 'wf1'}),
+    lambda: pyfaas.pyfaas_ping(),
+    lambda: pyfaas.pyfaas_get_worker_ids(),
+])
+def test_all_operations_raise_runtime_error_when_unconfigured(monkeypatch, call):
+    monkeypatch.setattr(pyfaas._CLIENT_MANAGER, 'configured', False)
+    with pytest.raises(RuntimeError):
+        call()
+
+
+def test_register_requires_func_code(fake_client):
+    from pyfaas.exceptions import PyFaaSFunctionRegistrationError
+    with pytest.raises(PyFaaSFunctionRegistrationError):
+        pyfaas.pyfaas_register(None)
+
+
+def test_unregister_requires_func_id(fake_client):
+    with pytest.raises(PyFaaSFunctionUnregistrationError):
+        pyfaas.pyfaas_unregister(None)
+
+
+def test_unregister_ok_status_with_unexpected_action_returns_none(fake_client):
+    # Only 'unregistered' is handled on status == 'ok'; any other action value falls
+    # through with no return/raise, so the caller silently gets None back.
+    fake_client.set_response('pyfaas_unregister', {'status': 'ok', 'action': 'something_else'})
+    assert pyfaas.pyfaas_unregister('fid') is None
+
+
+def test_exec_normalizes_none_default_args_to_empty_dict(fake_client):
+    fake_client.set_response('pyfaas_exec', {
+        'status': 'ok', 'action': 'executed', 'result_type': 'json', 'result': 3,
+    })
+    pyfaas.pyfaas_exec('fid', [1, 2], None)
+    _, call_args, _ = fake_client.calls[-1]
+    assert call_args[2] == {}
+
+
+def test_exec_ok_status_with_unexpected_action_returns_none(fake_client):
+    fake_client.set_response('pyfaas_exec', {'status': 'ok', 'action': 'something_else'})
+    assert pyfaas.pyfaas_exec('fid', []) is None
 
 
 def test_register_success_returns_func_id(fake_client):
@@ -195,6 +245,13 @@ def test_load_workflow_reads_json(fake_client, tmp_path):
     assert pyfaas.pyfaas_load_workflow(str(workflow_file)) == {'id': 'wf1'}
 
 
+def test_load_workflow_malformed_json_raises(fake_client, tmp_path):
+    workflow_file = tmp_path / 'wf.json'
+    workflow_file.write_text('{not valid json')
+    with pytest.raises(PyFaaSWorkflowLoadingError):
+        pyfaas.pyfaas_load_workflow(str(workflow_file))
+
+
 def _valid_workflow():
     return {
         'id': 'wf1',
@@ -213,6 +270,11 @@ def _valid_workflow():
 def test_chain_exec_requires_workflow(fake_client):
     with pytest.raises(PyFaaSChainedExecutionError):
         pyfaas.pyfaas_chain_exec(None)
+
+
+def test_chain_exec_rejects_empty_dict_workflow(fake_client):
+    with pytest.raises(PyFaaSChainedExecutionError):
+        pyfaas.pyfaas_chain_exec({})
 
 
 def test_chain_exec_rejects_structurally_invalid_workflow_without_contacting_client(fake_client):
@@ -252,3 +314,72 @@ def test_get_worker_ids_error_raises(fake_client):
     fake_client.set_response('pyfaas_get_worker_ids', {'status': 'err', 'message': 'boom'})
     with pytest.raises(PyFaaSWorkerIDsRetrievalError):
         pyfaas.pyfaas_get_worker_ids()
+
+
+# --- pyfaas_config / pyfaas_close ---
+
+@pytest.fixture
+def reset_client_manager(monkeypatch):
+    # pyfaas_config()/pyfaas_close() mutate the module-level singleton directly
+    # (rather than being swappable like the client, which `fake_client` replaces),
+    # so each test gets a pristine one and the real one is restored afterwards.
+    fresh = pyfaas._ClientManager()
+    monkeypatch.setattr(pyfaas, '_CLIENT_MANAGER', fresh)
+    return fresh
+
+
+def test_config_with_missing_file_path_uses_default_and_configures(reset_client_manager, monkeypatch, tmp_path):
+    config_file = tmp_path / 'config.toml'
+    config_file.write_text(
+        '[network]\ndirector_ip_addr = "127.0.0.1"\ndirector_port = 40000\nreceive_timeout_s = 5\n'
+        '[misc]\nlog_level = "info"\n'
+    )
+    monkeypatch.setattr(pyfaas, '_DEFAULT_CONFIG_FILE_PATH', str(config_file))
+    fake_pyfaas_client = MagicMock()
+    monkeypatch.setattr(pyfaas.pyfaas_client, 'PyfaasClient', fake_pyfaas_client)
+
+    pyfaas.pyfaas_config()
+
+    assert reset_client_manager.configured is True
+    assert reset_client_manager.client is fake_pyfaas_client.return_value
+
+
+def test_config_called_twice_reuses_existing_client(reset_client_manager, monkeypatch, tmp_path):
+    config_file = tmp_path / 'config.toml'
+    config_file.write_text(
+        '[network]\ndirector_ip_addr = "127.0.0.1"\ndirector_port = 40000\nreceive_timeout_s = 5\n'
+        '[misc]\nlog_level = "info"\n'
+    )
+    fake_pyfaas_client = MagicMock()
+    monkeypatch.setattr(pyfaas.pyfaas_client, 'PyfaasClient', fake_pyfaas_client)
+
+    pyfaas.pyfaas_config(str(config_file))
+    first_client = reset_client_manager.client
+    pyfaas.pyfaas_config(str(config_file))
+
+    assert reset_client_manager.client is first_client
+    fake_pyfaas_client.assert_called_once()
+
+
+def test_config_wraps_toml_errors(reset_client_manager, tmp_path):
+    from pyfaas.exceptions import PyFaaSConfigError
+    bad_config = tmp_path / 'bad.toml'
+    bad_config.write_text('not valid toml [[[')
+    with pytest.raises(PyFaaSConfigError):
+        pyfaas.pyfaas_config(str(bad_config))
+
+
+def test_close_shuts_down_client_and_resets_state(reset_client_manager):
+    fake_client = MagicMock()
+    reset_client_manager.client = fake_client
+    reset_client_manager.configured = True
+
+    pyfaas.pyfaas_close()
+
+    fake_client.zmq_close.assert_called_once()
+    assert reset_client_manager.client is None
+    assert reset_client_manager.configured is False
+
+
+def test_close_with_no_client_is_a_no_op(reset_client_manager):
+    pyfaas.pyfaas_close()  # must not raise

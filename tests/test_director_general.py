@@ -1,9 +1,10 @@
+import logging
 from pathlib import Path
 
 import pytest
 
 from pyfaas_director.app.exceptions import DirectorConfigError
-from pyfaas_director.app.util.general import read_config_toml
+from pyfaas_director.app.util.general import read_config_toml, setup_logging
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -71,3 +72,17 @@ def test_unknown_worker_selection_strategy_raises(tmp_path):
 def test_shipped_director_config_loads():
     config = read_config_toml(str(_REPO_ROOT / 'src' / 'pyfaas_director' / 'director_config.toml'))
     assert config['workers']['worker_selection_strategy'] == 'Round-Robin'
+
+
+@pytest.mark.parametrize('level, expected', [
+    ('debug', logging.DEBUG),
+    ('info', logging.INFO),
+    ('warning', logging.WARNING),
+    ('error', logging.ERROR),
+    ('critical', logging.CRITICAL),
+    ('fatal', logging.FATAL),
+    ('unknown-level', logging.INFO),  # falls back to INFO
+])
+def test_setup_logging_sets_root_level(level, expected):
+    setup_logging(level)
+    assert logging.getLogger().level == expected

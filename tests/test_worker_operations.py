@@ -1,4 +1,5 @@
 import base64
+import datetime
 import json
 import queue
 import threading
@@ -87,6 +88,16 @@ def test_register_missing_return_annotation_rejected(ops, worker_stub):
     assert 'fid1' not in worker_stub._functions
 
 
+def test_register_with_statistics_disabled_skips_stats_init(ops, worker_stub):
+    worker_stub._config = {**worker_stub._config, 'statistics': {'enabled': False}}
+
+    ops.execute_register_cmd({
+        'requester': 'client-1', 'serialized_func_base64': _encode(add), 'func_id': 'fid1',
+    })
+
+    assert 'fid1' not in worker_stub._stats
+
+
 def test_register_already_registered_is_a_no_op(ops, worker_stub):
     worker_stub._functions['fid1'] = {'name': 'add', 'code': add, 'registering_client': 'client-1'}
 
@@ -127,6 +138,52 @@ def test_list_filters_by_requesting_client(ops, worker_stub):
     assert response['result'] == {'fid1': 'add'}
 
 
+def test_list_error_returns_err_response(ops, worker_stub):
+    worker_stub._functions = {'fid1': {}}  # missing 'registering_client' -> KeyError inside the try block
+
+    ops.execute_list_cmd({'requester': 'client-1', 'request_id': 'req-1'})
+
+    response = last_response(worker_stub)
+    assert response['status'] == 'err'
+
+
+# --- get_cache_dump ---
+
+def test_get_cache_dump_returns_current_cache_state(ops, worker_stub):
+    worker_stub._function_exec_cache.add('fid1', [1], {}, 'result')
+
+    ops.execute_get_cache_dump_cmd({'requester': 'client-1'})
+
+    response = last_response(worker_stub)
+    assert response['status'] == 'ok'
+    (entry,) = response['result']['cache'].values()
+    assert entry['func_id'] == 'fid1'
+
+
+# --- get_worker_info ---
+
+def test_get_worker_info_returns_identity_and_config_summary(ops, worker_stub):
+    worker_stub._start_time = datetime.datetime.now()
+    worker_stub._functions = {'fid1': {'name': 'add', 'registering_client': 'client-1'}}
+
+    ops.execute_get_worker_info_cmd({'requester': 'client-1'})
+
+    response = last_response(worker_stub)
+    assert response['status'] == 'ok'
+    assert response['result']['identity']['id'] == 'worker-test'
+    assert response['result']['config']['enabled_statistics'] is True
+    assert response['result']['functions'] == worker_stub._functions
+
+
+def test_get_worker_info_error_returns_err_response(ops, worker_stub):
+    worker_stub._start_time = None  # .isoformat() on None raises AttributeError
+
+    ops.execute_get_worker_info_cmd({'requester': 'client-1'})
+
+    response = last_response(worker_stub)
+    assert response['status'] == 'err'
+
+
 # --- unregister ---
 
 def test_unregister_success_removes_function_and_stats(ops, worker_stub):
@@ -161,6 +218,17 @@ def test_unregister_unknown_func_id(ops, worker_stub):
     assert response['action'] == 'no_func'
 
 
+def test_unregister_with_statistics_disabled_skips_stats_deletion(ops, worker_stub):
+    worker_stub._config = {**worker_stub._config, 'statistics': {'enabled': False}}
+    worker_stub._functions['fid1'] = {'name': 'add', 'code': add, 'registering_client': 'client-1'}
+
+    ops.execute_unregister_cmd({'requester': 'client-1', 'request_id': 'req-1', 'func_id': 'fid1'})
+
+    response = last_response(worker_stub)
+    assert response['status'] == 'ok'
+    assert 'fid1' not in worker_stub._functions
+
+
 def test_unregister_failure_should_not_log_terminated_without_errors(ops, worker_stub):
     # execute_unregister_cmd unconditionally logs "... terminated without
     # errors" as its last line, even on the 'no_func'/'forbidden' failure paths.
@@ -187,6 +255,15 @@ def test_get_stats_filters_by_requesting_client(ops, worker_stub):
     assert response['result'] == {'fid1': {'#calls': 3}}
 
 
+def test_get_stats_error_returns_err_response(ops, worker_stub):
+    worker_stub._functions = {'fid1': {}}  # missing 'registering_client' -> KeyError inside the try block
+
+    ops.execute_get_stats_cmd({'requester': 'client-1', 'request_id': 'req-1'})
+
+    response = last_response(worker_stub)
+    assert response['status'] == 'err'
+
+
 # --- exec ---
 
 def test_exec_unknown_func_id_returns_err(ops, worker_stub):
@@ -211,6 +288,46 @@ def test_exec_success_returns_json_result_and_records_stats(ops, worker_stub):
     assert response['result_type'] == 'json'
     assert response['result'] == 6
     assert worker_stub._stats['fid1']['#calls'] == 1
+
+
+def test_exec_omitted_positional_and_default_args_keys_default_to_empty(ops, worker_stub):
+    def no_args() -> int:
+        return 42
+
+    worker_stub._functions['fid1'] = {'name': 'no_args', 'code': no_args, 'registering_client': 'client-1'}
+    worker_stub._stats['fid1'] = {}
+
+    ops.execute_exec_cmd({'requester': 'client-1', 'func_id': 'fid1'})  # no 'positional_args'/'default_args' keys at all
+
+    response = last_response(worker_stub)
+    assert response['status'] == 'ok'
+    assert response['result'] == 42
+
+
+def test_exec_second_call_accumulates_stats(ops, worker_stub):
+    worker_stub._functions['fid1'] = {'name': 'add', 'code': add, 'registering_client': 'client-1'}
+    worker_stub._stats['fid1'] = {}
+
+    ops.execute_exec_cmd({'requester': 'client-1', 'func_id': 'fid1', 'positional_args': [1, 2], 'default_args': {}})
+    last_response(worker_stub)  # drain first response
+    ops.execute_exec_cmd({'requester': 'client-1', 'func_id': 'fid1', 'positional_args': [1, 2], 'default_args': {}})
+    last_response(worker_stub)  # drain second response
+
+    assert worker_stub._stats['fid1']['#calls'] == 2
+    assert worker_stub._stats['fid1']['tot_exec_time'] == pytest.approx(
+        worker_stub._stats['fid1']['avg_exec_time'] * 2
+    )
+
+
+def test_exec_with_statistics_disabled_skips_stats_recording(ops, worker_stub):
+    worker_stub._config = {**worker_stub._config, 'statistics': {'enabled': False}}
+    worker_stub._functions['fid1'] = {'name': 'add', 'code': add, 'registering_client': 'client-1'}
+
+    ops.execute_exec_cmd({'requester': 'client-1', 'func_id': 'fid1', 'positional_args': [1, 2], 'default_args': {}})
+
+    response = last_response(worker_stub)
+    assert response['status'] == 'ok'
+    assert worker_stub._stats == {}
 
 
 def test_exec_non_json_result_is_pickled(ops, worker_stub):

@@ -18,7 +18,7 @@ A proper FaaS library that allows clients to remotely requests functions executi
 2) Server/Worker validates such a request
 3) Spawns a container (or reuses one of a controlled pool)
 4) Executes function in the containerized environment
-5) Returns to the client the function result/eventual errors
+5) Returns to the client the function result/potential errors
 
 The most straightforward way to implement such a workflow would be to leverage Docker and Python's Docker container management SDK.
 
