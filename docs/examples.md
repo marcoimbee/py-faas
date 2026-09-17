@@ -150,14 +150,6 @@ except PyFaaSConfigError as e:
 
 If a configuration file is not specified, PyFaaS will resort to a default configuration file that must be found in the project's base directory.
 
-## Kill worker
-
-```python
-from pyfaas import pyfaas_kill_worker
-
-pyfaas_kill_worker()
-```
-
 ## Worker information retrieval
 
 ```python
