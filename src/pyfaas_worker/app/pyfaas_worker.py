@@ -262,11 +262,12 @@ class PyfaasWorker:
 
     def _synchronize_state(self):
         # Send to Director the function IDs of the functions registered on this Worker
-        synch_json_response = {
-            'operation': 'sync_state_response',
-            'action': 'current_functions_state',
-            'functions': list(self._functions.keys())   # Send just the IDs, code will be received later on, if needed
-        }
+        with self._lock:
+            synch_json_response = {
+                'operation': 'sync_state_response',
+                'action': 'current_functions_state',
+                'functions': list(self._functions.keys())   # Send just the IDs, code will be received later on, if needed
+            }
         response = [b'', json.dumps(synch_json_response).encode()]
         self._outgoing_tx_queue.put(response)
         

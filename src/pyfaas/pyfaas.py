@@ -40,7 +40,7 @@ _CLIENT_MANAGER = _ClientManager()               # Initialized by a call to pyfa
 
 # --- PyFaaS configuration
 _CONFIG_FILE_PATH: str | None = None
-_DEFAULT_CONFIG_FILE_PATH: str = 'test/client_config.toml'
+_DEFAULT_CONFIG_FILE_PATH: str = 'system_test/client_config.toml'
 
 # --- Logging ---
 logger = logging.getLogger('pyfaas')

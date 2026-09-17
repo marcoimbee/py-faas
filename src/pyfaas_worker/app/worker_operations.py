@@ -594,8 +594,8 @@ class WorkerOperations:
                     self.worker._file_logger.log('INFO', 'Cache hit')
                     return func_res
                 except WorkerFunctionCacheError as e:
-                    self._logger.error(f'Exception while fetching result from cache: {e}')
-                    self._file_logger.log('ERROR', f'Cache error: {e}')
+                    self.worker._logger.error(f'Exception while fetching result from cache: {e}')
+                    self.worker._file_logger.log('ERROR', f'Cache error: {e}')
                     raise Exception(e)
             else:
                 # Result is NOT in cache
@@ -634,13 +634,12 @@ class WorkerOperations:
             raise WorkerFunctionExecutionError(e)
 
     def _record_stats(self, func_id: str, exec_time: float) -> None:
-        if self.worker._stats[func_id] == {}:
-            with self.worker._lock:
+        with self.worker._lock:
+            if self.worker._stats[func_id] == {}:
                 self.worker._stats[func_id]['#calls'] = 1
                 self.worker._stats[func_id]['avg_exec_time'] = exec_time
                 self.worker._stats[func_id]['tot_exec_time'] = exec_time
-        else:
-            with self.worker._lock:
+            else:
                 self.worker._stats[func_id]['#calls'] += 1
                 self.worker._stats[func_id]['tot_exec_time'] += exec_time
                 avg_exec_time = self.worker._stats[func_id]['tot_exec_time'] / self.worker._stats[func_id]['#calls']

@@ -19,6 +19,8 @@ class PyfaasClient:
 
         self._receive_timeout_ms = receive_timeout_s * 1000
 
+        self._max_request_retries = 3
+
         # ZeroMQ
         self._zmq_context = zmq.Context()
         self._zmq_socket = self._zmq_context.socket(zmq.DEALER)
@@ -31,7 +33,6 @@ class PyfaasClient:
         self._zmq_socket.connect(director_connection_string)
 
     def _send_request(self, operation: str, extra_payload: dict = None) -> dict:
-        max_retries = 3
         backoff = 0.2       # Seconds
         
         payload = {
@@ -44,15 +45,16 @@ class PyfaasClient:
 
         msg = [b'', json.dumps(payload).encode()]
 
-        for attempt in range(max_retries):
+        for attempt in range(self._max_request_retries):
             try:
                 self._zmq_socket.send_multipart(msg)
                 _, response = self._zmq_socket.recv_multipart()
                 return json.loads(response.decode())
             except zmq.Again:
-                self._logger.warning(f"Timeout on '{operation}', attempt {attempt+1}/{max_retries}")
+                self._logger.warning(f"Timeout on '{operation}', attempt {attempt+1}/{self._max_request_retries}")
                 self._recreate_socket()
-                time.sleep(backoff)
+                if attempt == self._max_request_retries - 1:    # Skip waiting if failing
+                    time.sleep(backoff)
                 backoff *= 2  # Exponential backoff
         raise zmq.Again     # Avoid returning none after all the retries
     
