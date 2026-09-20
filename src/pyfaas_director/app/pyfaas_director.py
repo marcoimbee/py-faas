@@ -280,6 +280,19 @@ class PyfaasDirector:
                     requested_func_id = json_payload.get('func_id')      # The ID (hash) of the function the user has requested the execution 
                     self._logger.debug(f"Function is identified by '{requested_func_id}'")
                     
+                    if requested_func_id not in self._functions_workers_map:
+                        err_msg = f"No function is identified by ID '{requested_func_id}'"
+                        self._logger.debug(err_msg)
+                        err_response = {
+                            'status': 'err',
+                            'message': err_msg
+                        }
+                        msg = [client_id.encode(), b'', json.dumps(err_response).encode()]
+                        self._zmq_socket.send_multipart(msg)
+                        with self._lock:
+                            self._currently_connected_clients.remove(client_id)
+                        return
+
                     selected_worker_id = self._select_worker(requested_func_id)
                     self._logger.debug(f"Chosen worker '{selected_worker_id}' for '{requested_func_id}' execution")
 
@@ -453,6 +466,7 @@ class PyfaasDirector:
             raise DirectorNoAvailableWorkersError('No Workers are available')
         
         # User requested a function execution operation (passed the target function's hash)
+        # If here, we already checked if the function is registered
         if func_id is not None:
             # Check if the function can be found only in a single worker (this means workers have not
             # been synchronized yet, if multiple)
