@@ -295,7 +295,7 @@ class WorkerOperations:
 
         func_id = json_payload['func_id']       # Used as KEY to access self._functions
         func_positional_args = json_payload.get('positional_args', [])        # Default empty list
-        func_default_args = json_payload.get('default_args', {})              # Default empty dict
+        func_default_args = json_payload.get('default_args') or {}            # Default empty dict, also covers an explicit None
         save_in_cache = json_payload.get('save_in_cache', False)  # Default to False if something weird has been specified client-side
 
         if func_id not in self.worker._functions:

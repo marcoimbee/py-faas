@@ -358,11 +358,6 @@ def test_exec_raising_function_returns_err(ops, worker_stub):
     assert 'kaboom' in response['message']
 
 
-@pytest.mark.xfail(reason="execute_exec_cmd does `.get('default_args', {})`, but PyfaasClient.pyfaas_exec() "
-                           'sends an explicit default_args=None instead of omitting the key -- .get() then '
-                           'returns None rather than {}, and **None crashes cache-key building before the '
-                           'function ever runs. pyfaas.pyfaas_exec() avoids this by normalizing None to {} '
-                           'itself before calling the client.')
 def test_exec_none_default_args_crashes(ops, worker_stub):
     worker_stub._functions['fid1'] = {'name': 'add', 'code': add, 'registering_client': 'client-1'}
     worker_stub._stats['fid1'] = {}
