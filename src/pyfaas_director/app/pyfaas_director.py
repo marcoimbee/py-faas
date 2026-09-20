@@ -486,6 +486,8 @@ class PyfaasDirector:
             # Check if the function can be found only in a single worker (this means workers have not
             # been synchronized yet, if multiple)
             if self._functions_workers_map[func_id]['available_on'] != 'ANY':
+                if not self._functions_workers_map[func_id]['available_on']:            # Function is registered but the worker(s) it was available on have all died: 'available_on' holds '[]'
+                    raise DirectorNoAvailableWorkersError(f"No Worker currently holds function '{func_id}'")
                 if len(self._functions_workers_map[func_id]['available_on']) == 1:
                     return self._functions_workers_map[func_id]['available_on'][0]      # Get the single Worker on which the function is available on
                 else:       # If here, during synchronization one/more Workers failed to synchronize, choose one
@@ -849,8 +851,16 @@ class PyfaasDirector:
                 finally:
                     with self._lock:
                         if worker_id in self._workers:
+                            # DELETING WORKER
                             self._logger.info(f"Worker '{worker_id}' unregistered")
                             del self._workers[worker_id]
+                            # Deleting worker from the lists that tell where a certain function can be executed at
+                            for _, functions_map in self._functions_workers_map.items():
+                                available_on = functions_map['available_on']
+                                if available_on == 'ANY':
+                                    continue
+                                if worker_id in available_on:
+                                    available_on.remove(worker_id)
 
     def _cleanup(self) -> None:
         try:

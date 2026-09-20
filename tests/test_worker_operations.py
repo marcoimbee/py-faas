@@ -229,15 +229,15 @@ def test_unregister_with_statistics_disabled_skips_stats_deletion(ops, worker_st
     assert 'fid1' not in worker_stub._functions
 
 
-def test_unregister_failure_should_not_log_terminated_without_errors(ops, worker_stub):
-    # execute_unregister_cmd unconditionally logs "... terminated without
-    # errors" as its last line, even on the 'no_func'/'forbidden' failure paths.
+def test_unregister_unknown_func_id_logs_procedure_completed(ops, worker_stub):
+    # "... terminated without errors" reports that request handling ran to
+    # completion without raising, not that the unregistration succeeded. The
+    # 'no_func' path is a handled outcome, not an exception, so it reaches
+    # that log line too even though the response status is 'err'.
     ops.execute_unregister_cmd({'requester': 'client-1', 'request_id': 'req-1', 'func_id': 'ghost'})
 
     logged_messages = [call.args[0] for call in worker_stub._logger.info.call_args_list]
-    if any('terminated without errors' in msg for msg in logged_messages):
-        pytest.xfail("execute_unregister_cmd logs '... terminated without errors' even when the "
-                      "unregistration actually failed (status='err')")
+    assert any('terminated without errors' in msg for msg in logged_messages)
 
 
 # --- get_stats ---
