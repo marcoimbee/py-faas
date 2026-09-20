@@ -307,6 +307,18 @@ class PyfaasDirector:
 
                     json_workflow = json_payload['json_workflow']
                     workflow_function_set = json_workflow.get('functions')
+                    if not isinstance(workflow_function_set, dict):
+                        err_msg = "Missing or malformed 'functions' object in workflow"
+                        self._logger.debug(err_msg)
+                        err_response = {
+                            'status': 'err',
+                            'message': err_msg
+                        }
+                        msg = [client_id.encode(), b'', json.dumps(err_response).encode()]
+                        self._zmq_socket.send_multipart(msg)
+                        with self._lock:
+                            self._currently_connected_clients.remove(client_id)
+                        return
 
                     # Checking if:
                     #   - The referenced functions have been registered at all (do functions with such name exist?)
@@ -324,7 +336,7 @@ class PyfaasDirector:
                         self._logger.warning(f"Client '{client_id}' requested a chained execution of functions named '{function_names}', but functions '{missing_funcs}' have not been registered")
                         err_response = {
                             'status': 'err',
-                            'message': f"unknown function(s) '{missing_funcs}' referenced"
+                            'message': f"Unknown function(s) '{missing_funcs}' referenced"
                         }
                         msg = [client_id.encode(), b'', json.dumps(err_response).encode()]
                         self._zmq_socket.send_multipart(msg)
