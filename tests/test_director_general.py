@@ -17,6 +17,7 @@ def _valid_toml(**overrides):
         'expected_heartbeat_interval_ms': 2000,
         'synchronization_interval_ms': 5000,
         'worker_selection_strategy': 'Round-Robin',
+        'proximity_recording_interval_ms': 1000,
     }
     values.update(overrides)
     return f"""
@@ -29,6 +30,7 @@ heartbeat_check_interval_ms = {values['heartbeat_check_interval_ms']}
 expected_heartbeat_interval_ms = {values['expected_heartbeat_interval_ms']}
 synchronization_interval_ms = {values['synchronization_interval_ms']}
 worker_selection_strategy = "{values['worker_selection_strategy']}"
+proximity_recording_interval_ms = {values['proximity_recording_interval_ms']}
 """
 
 
@@ -58,15 +60,27 @@ def test_invalid_port_raises(tmp_path, port):
     'heartbeat_check_interval_ms',
     'expected_heartbeat_interval_ms',
     'synchronization_interval_ms',
+    'proximity_recording_interval_ms',
 ])
 def test_non_positive_interval_raises(tmp_path, field):
     with pytest.raises(DirectorConfigError):
         read_config_toml(_write(tmp_path, _valid_toml(**{field: 0})))
 
 
+def test_proximity_recording_interval_omitted_is_accepted(tmp_path):
+    body = _valid_toml().replace('proximity_recording_interval_ms = 1000', '')
+    config = read_config_toml(_write(tmp_path, body))
+    assert config['workers'].get('proximity_recording_interval_ms') is None
+
+
 def test_unknown_worker_selection_strategy_raises(tmp_path):
     with pytest.raises(DirectorConfigError):
         read_config_toml(_write(tmp_path, _valid_toml(worker_selection_strategy='Fastest')))
+
+
+def test_proximity_based_strategy_is_accepted(tmp_path):
+    config = read_config_toml(_write(tmp_path, _valid_toml(worker_selection_strategy='Proximity-based')))
+    assert config['workers']['worker_selection_strategy'] == 'Proximity-based'
 
 
 def test_shipped_director_config_loads():

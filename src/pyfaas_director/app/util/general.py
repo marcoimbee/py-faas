@@ -29,8 +29,13 @@ def read_config_toml(path: str) -> dict:
     if config['workers']['synchronization_interval_ms'] is None or config['workers']['synchronization_interval_ms'] <= 0:
         raise DirectorConfigError(f"Config error: invalid or missing field value for 'synchronization_interval_ms': {config['workers']['synchronization_interval_ms']}")
 
+    # Checking proximity recording interval fields
+    if config['workers'].get('proximity_recording_interval_ms') is not None:
+        if config['workers']['proximity_recording_interval_ms'] <= 0:
+            raise DirectorConfigError(f"Config error: invalid field value for 'proximity_recording_interval_ms': {config['workers']['proximity_recording_interval_ms']}")
+
     # Checking worker selection strategy
-    allowed = ['Round-Robin', 'Random']
+    allowed = ['Round-Robin', 'Random', 'Proximity-based']
     if config['workers']['worker_selection_strategy'] is None or config['workers']['worker_selection_strategy'] not in allowed:
         raise DirectorConfigError(f"Config error: invalid or missing field value for 'worker_selection_strategy': {config['workers']['worker_selection_strategy']}") 
 
