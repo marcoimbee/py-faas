@@ -17,6 +17,7 @@ def director_config(tmp_path):
             'expected_heartbeat_interval_ms': 2000,
             'worker_selection_strategy': 'Round-Robin',
             'synchronization_interval_ms': 5000,
+            'proximity_recording_interval_ms': 1000,
         },
     }
 

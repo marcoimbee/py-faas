@@ -35,6 +35,7 @@ def cluster(tmp_path_factory):
             'expected_heartbeat_interval_ms': 10000,
             'worker_selection_strategy': 'Round-Robin',
             'synchronization_interval_ms': 60000,
+            'proximity_recording_interval_ms': 1000,
         },
     }
     worker_config = {

@@ -11,6 +11,9 @@ import uuid
 import base64
 import queue
 import argparse
+import subprocess
+import platform
+import re
 
 from collections import defaultdict
 from pathlib import Path
@@ -47,9 +50,11 @@ class PyfaasDirector:
         self._workers = {}
         self._request_count = 0
 
+        # General threading management
+        self._threading_stop_event = threading.Event()
+
         # Heartbeat monitor thread
         self._heartbeat_thread = None
-        self._threading_stop_event = threading.Event()
 
         # Every how many ms we check if workers are alive
         self._heartbeat_check_interval_ms = self._config['workers']['heartbeat_check_interval_ms']
@@ -63,12 +68,18 @@ class PyfaasDirector:
         self._round_robin_index = 0
         self._worker_selection_strategy = self._config['workers']['worker_selection_strategy']
 
+        # Management of the Proximity-based worker selection strategy
+        self._worker_proximity_recorder_thread = None   # Thread to record workers proximity
+        self._proximity_recording_interval_ms = self._config['workers'].get('proximity_recording_interval_ms')      #Every how many ms we should update the registered workers proximity to the Director
+        self._closest_worker = None                     # Holds, at any point in time, the Worker ID that of the Worker that is closest to the Director
+        self._worker_proximity_map = {}                 # Dict holding pairs like "worker_id": <director-to-worker-latency> (in ms)
+
         self._start_time = datetime.datetime.now()
         self._last_worker_connection_ts = None
 
         # Keep track of clients that are currently waiting for a response from a worker
         self._currently_connected_clients = []
-        
+
         self._worker_synchronizer_thread = None   # Thread to synchronize worker state (functions list)
         self._workers_are_synchronized = False
 
@@ -130,6 +141,15 @@ class PyfaasDirector:
             daemon=True
         )
         self._worker_synchronizer_thread.start()
+
+        # Starting workers proximity recording thread (only if the selection strategy is set to 'Proximity-based')
+        if self._worker_selection_strategy == 'Proximity-based':
+            self._worker_proximity_recorder_thread = threading.Thread(
+                target=self._record_workers_proximity,
+                args=(),
+                daemon=True
+            )
+            self._worker_proximity_recorder_thread.start()
         
         # Main loop
         while True:
@@ -493,6 +513,7 @@ class PyfaasDirector:
                 else:       # If here, during synchronization one/more Workers failed to synchronize, choose one
                     match self._worker_selection_strategy:
                         case 'Round-Robin':
+                            # Get IDs of Workers the function is available on
                             worker_ids = self._functions_workers_map[func_id]['available_on']           # It's a list
                             worker_id = worker_ids[self._round_robin_index % len(worker_ids)]
                             self._round_robin_index += 1
@@ -500,6 +521,14 @@ class PyfaasDirector:
                         case 'Random':
                             worker_id = random.choice(self._functions_workers_map[func_id]['available_on'])
                             return worker_id
+                        case 'Proximity-based':
+                            # Get IDs of Workers the function is available on
+                            worker_ids = self._functions_workers_map[func_id]['available_on']
+                            if self._closest_worker in worker_ids:
+                                return self._closest_worker
+                            else:
+                                # Choose closest among candidates (as the absolute closest one does not hold the requested function)
+                                return min(worker_ids, key=lambda w: self._worker_proximity_map.get(w, float('inf')))
 
         # Multiple Workers and possibly synchronized, choose worker
         match self._worker_selection_strategy:
@@ -511,6 +540,8 @@ class PyfaasDirector:
             case 'Random':
                 worker_id, _ = random.choice(list(self._workers.items()))
                 return worker_id
+            case 'Proximity-based':
+                return self._closest_worker
             case _:
                 raise DirectorConfigError('Unknown worker selection strategy')
 
@@ -531,15 +562,17 @@ class PyfaasDirector:
 
                 # Init dict entry for the new worker
                 with self._lock:
+                    worker_ip_address = json_payload['ip_address']
                     self._workers[worker_id] = {
                         'registered_at': datetime.datetime.now(),
-                        'last_heartbeat': datetime.datetime.now()
+                        'last_heartbeat': datetime.datetime.now(),
+                        'ip_address': worker_ip_address
                     }
                 
                 # Send back ACK msg to worker that wants to register
                 ack_msg = [worker_id.encode(), b'', json.dumps({'ACK': 'OK'}).encode()]
                 self._zmq_socket.send_multipart(ack_msg)
-                self._logger.info(f"Worker '{worker_id}' registered and stored")
+                self._logger.info(f"Worker '{worker_id}' (@{worker_ip_address}) registered and stored")
                 self._logger.debug(f'Current status of self._workers: {self._workers}')
 
                 self._last_worker_connection_ts = datetime.datetime.now()
@@ -872,6 +905,9 @@ class PyfaasDirector:
             if self._worker_synchronizer_thread and self._worker_synchronizer_thread.is_alive():
                 self._worker_synchronizer_thread.join(timeout=2) # Waiting for it to exit cleanly
                 self._logger.info('Successfully stopped Worker synchronization thread')
+            if self._worker_proximity_recorder_thread and self._worker_proximity_recorder_thread.is_alive():
+                self._worker_proximity_recorder_thread.join(timeout=2) # Waiting for it to exit cleanly
+                self._logger.info('Successfully stopped Worker proximity recording thread')
             self._zmq_socket.close(linger=0)
             self._zmq_context.term()
             self._logger.info('Successfully closed ZeroMQ context and socket')
@@ -908,6 +944,43 @@ class PyfaasDirector:
         
         return aggregated_stats
 
+    def _record_workers_proximity(self) -> None:
+        self._logger.info('Started worker proximity recording thread...')
+        while not self._threading_stop_event.is_set():
+            time.sleep(self._proximity_recording_interval_ms / 1000)
+
+            with self._lock:
+                registered_workers_ids = list(self._workers.keys())
+
+            for worker_id in registered_workers_ids:
+                try:
+                    updated_latency = self._get_director_to_worker_latency(worker_id)
+                except (KeyError, OSError, subprocess.SubprocessError) as e:
+                    self._logger.warning(f"Failed to record proximity for worker '{worker_id}': {e}")
+                    continue
+                if updated_latency is not None:
+                    self._worker_proximity_map[worker_id] = updated_latency
+
+            if self._worker_proximity_map:
+                self._closest_worker = min(self._worker_proximity_map, key=self._worker_proximity_map.get)
+
+    def _get_director_to_worker_latency(self, worker_id: str) -> float | None:
+        with self._lock:
+            worker_ip_address = self._workers[worker_id]['ip_address']
+
+        timeout_s = 2
+
+        count_flag = '-n' if platform.system() == 'Windows' else '-c'
+        ping_cmd_output = subprocess.run(
+            ['ping', count_flag, '1', worker_ip_address], 
+            capture_output=True,
+            text=True,
+            timeout=timeout_s
+        )
+        match = re.search(r'time[=<]\s*([\d.]+)\s*ms', ping_cmd_output.stdout, re.IGNORECASE)
+
+        return float(match.group(1)) if match else None
+        
 
 def setup_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()

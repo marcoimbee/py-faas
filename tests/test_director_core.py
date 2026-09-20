@@ -1,5 +1,6 @@
 import datetime
 import json
+import subprocess
 import threading
 import time
 from unittest.mock import MagicMock
@@ -89,9 +90,10 @@ def test_aggregate_stats_ignores_functions_with_no_calls_yet(director):
 # --- _handle_worker_request: worker_registration / heartbeat ---
 
 def test_worker_registration_stores_worker_and_sends_ack(director):
-    director._handle_worker_request('worker-1', {'operation': 'worker_registration'})
+    director._handle_worker_request('worker-1', {'operation': 'worker_registration', 'ip_address': '127.0.0.1'})
 
     assert 'worker-1' in director._workers
+    assert director._workers['worker-1']['ip_address'] == '127.0.0.1'
     ack_call = director._zmq_socket.send_multipart.call_args
     dest, empty, body = ack_call.args[0]
     assert dest == b'worker-1'
@@ -643,3 +645,132 @@ def test_select_worker_for_func_with_unknown_strategy_raises_via_fallthrough(dir
 
     with pytest.raises(DirectorConfigError):
         director._select_worker('fid1')
+
+
+# --- _select_worker: Proximity-based strategy ---
+
+def test_select_worker_proximity_based_returns_closest_worker(director):
+    director._worker_selection_strategy = 'Proximity-based'
+    director._workers = {'worker-1': {}, 'worker-2': {}}
+    director._closest_worker = 'worker-2'
+
+    assert director._select_worker() == 'worker-2'
+
+
+def test_select_worker_for_func_proximity_based_returns_closest_when_available(director):
+    director._worker_selection_strategy = 'Proximity-based'
+    director._workers = {'worker-1': {}, 'worker-2': {}, 'worker-3': {}}
+    director._functions_workers_map['fid1'] = {'available_on': ['worker-1', 'worker-2']}
+    director._closest_worker = 'worker-2'
+
+    assert director._select_worker('fid1') == 'worker-2'
+
+
+def test_select_worker_for_func_proximity_based_falls_back_to_closest_among_candidates(director):
+    # The globally closest Worker doesn't hold the requested function -- fall back
+    # to the lowest-latency Worker among the ones that actually have it.
+    director._worker_selection_strategy = 'Proximity-based'
+    director._workers = {'worker-1': {}, 'worker-2': {}, 'worker-3': {}}
+    director._functions_workers_map['fid1'] = {'available_on': ['worker-1', 'worker-3']}
+    director._closest_worker = 'worker-2'  # not in available_on
+    director._worker_proximity_map = {'worker-1': 50.0, 'worker-2': 5.0, 'worker-3': 12.0}
+
+    assert director._select_worker('fid1') == 'worker-3'
+
+
+def test_select_worker_for_func_proximity_based_treats_unmeasured_candidate_as_last_resort(director):
+    director._worker_selection_strategy = 'Proximity-based'
+    director._workers = {'worker-1': {}, 'worker-2': {}, 'worker-3': {}}
+    director._functions_workers_map['fid1'] = {'available_on': ['worker-1', 'worker-3']}
+    director._closest_worker = 'worker-2'  # not in available_on
+    director._worker_proximity_map = {'worker-1': 50.0}  # worker-3 has never been pinged yet
+
+    assert director._select_worker('fid1') == 'worker-1'
+
+
+# --- _get_director_to_worker_latency ---
+
+def test_get_director_to_worker_latency_parses_ping_output(director, monkeypatch):
+    director._workers = {'worker-1': {'ip_address': '10.0.0.5'}}
+    captured_args = {}
+
+    def fake_run(args, **kwargs):
+        captured_args['args'] = args
+        return MagicMock(stdout='Reply from 10.0.0.5: bytes=32 time=13.9ms TTL=64')
+
+    monkeypatch.setattr('pyfaas_director.app.pyfaas_director.subprocess.run', fake_run)
+
+    latency = director._get_director_to_worker_latency('worker-1')
+
+    assert latency == 13.9
+    assert captured_args['args'][-1] == '10.0.0.5'
+
+
+def test_get_director_to_worker_latency_returns_none_when_unreachable(director, monkeypatch):
+    director._workers = {'worker-1': {'ip_address': '10.0.0.5'}}
+    monkeypatch.setattr(
+        'pyfaas_director.app.pyfaas_director.subprocess.run',
+        lambda *a, **k: MagicMock(stdout='Request timed out.'),
+    )
+
+    assert director._get_director_to_worker_latency('worker-1') is None
+
+
+# --- _record_workers_proximity ---
+
+def test_record_workers_proximity_updates_map_and_picks_closest(director, monkeypatch):
+    director._workers = {'worker-1': {}, 'worker-2': {}}
+    director._worker_selection_strategy = 'Proximity-based'
+
+    def fake_sleep(_):
+        director._threading_stop_event.set()  # stop after a single loop iteration
+
+    monkeypatch.setattr(time, 'sleep', fake_sleep)
+    monkeypatch.setattr(
+        director, '_get_director_to_worker_latency',
+        lambda worker_id: {'worker-1': 20.0, 'worker-2': 5.0}[worker_id],
+    )
+
+    director._record_workers_proximity()
+
+    assert director._worker_proximity_map == {'worker-1': 20.0, 'worker-2': 5.0}
+    assert director._closest_worker == 'worker-2'
+
+
+def test_record_workers_proximity_skips_worker_on_error_without_crashing(director, monkeypatch):
+    # A single unreachable/erroring Worker must not take down the whole recording
+    # loop -- the others still get measured and a closest Worker still gets picked.
+    director._workers = {'worker-1': {}, 'worker-2': {}}
+    director._worker_selection_strategy = 'Proximity-based'
+
+    def fake_sleep(_):
+        director._threading_stop_event.set()
+
+    def fake_latency(worker_id):
+        if worker_id == 'worker-1':
+            raise subprocess.TimeoutExpired(cmd='ping', timeout=2)
+        return 5.0
+
+    monkeypatch.setattr(time, 'sleep', fake_sleep)
+    monkeypatch.setattr(director, '_get_director_to_worker_latency', fake_latency)
+
+    director._record_workers_proximity()  # must not raise
+
+    assert director._worker_proximity_map == {'worker-2': 5.0}
+    assert director._closest_worker == 'worker-2'
+
+
+def test_record_workers_proximity_leaves_closest_worker_unset_when_every_ping_fails(director, monkeypatch):
+    director._workers = {'worker-1': {}}
+    director._worker_selection_strategy = 'Proximity-based'
+
+    def fake_sleep(_):
+        director._threading_stop_event.set()
+
+    monkeypatch.setattr(time, 'sleep', fake_sleep)
+    monkeypatch.setattr(director, '_get_director_to_worker_latency', lambda worker_id: None)
+
+    director._record_workers_proximity()  # must not raise
+
+    assert director._worker_proximity_map == {}
+    assert director._closest_worker is None

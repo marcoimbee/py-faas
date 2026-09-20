@@ -11,6 +11,7 @@ import sys
 import queue
 import base64
 import argparse
+import socket
 
 from pathlib import Path
 from pyfaas_worker.app.util import general
@@ -26,7 +27,8 @@ class PyfaasWorker:
         self._logger = logging.getLogger('pyfaas.worker')
 
         self._id = f'worker-{uuid.uuid4()}'
-        self._logger.info(f"Worker '{self._id}' up")
+        self._host = socket.gethostbyname(socket.gethostname())
+        self._logger.info(f"Worker '{self._id}' up ({self._host})")
 
         # Dependency injection: get operartions from dedicated class and make the 
         # class able to access PyfaasWorker attributes with self
@@ -120,8 +122,12 @@ class PyfaasWorker:
     def _register_to_director(self) -> None:
         director_connection_str = f'tcp://{self._director_host}:{self._director_port}'
         self._zmq_socket.connect(director_connection_str)
-        
-        registration_msg = [b'', json.dumps({'operation': 'worker_registration'}).encode()]   # Worker ID automatically included by ZeroMQ (see call to setsockopt in __int__)
+
+        registration_payload = {
+            'operation': 'worker_registration',
+            'ip_address': self._host
+        }
+        registration_msg = [b'', json.dumps(registration_payload).encode()]   # Worker ID automatically included by ZeroMQ (see call to setsockopt in __int__)
         self._zmq_socket.send_multipart(registration_msg)
 
         # Polling for director ACK: wait for up to 10s

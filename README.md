@@ -102,6 +102,7 @@ greeting_msg = "Hello brother"
     Available policies:
     - `Random`: the destination Worker is randomly chosen from the pool of registered ones.
     - `Round-Robin`: the destination Worker is chosen using a Round-Robin policy from the pool of registered ones.
+    - `Proximity-based`: the destination Worker is chosen using a proximity-based policy from the pool of registered ones. The closest one to the Director, using a `ping`-based strategy, is the one which gets chosen.
 - `[misc]`: miscellaneous configuration options
   - `greeting_msg`: a greeting message that will be printed to stdout when the Director starts (merely for testing purposes).
 
