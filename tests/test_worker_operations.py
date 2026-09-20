@@ -421,7 +421,7 @@ def test_chain_exec_runs_a_two_function_workflow(ops, worker_stub):
         },
     }
 
-    ops.execute_chain_exec_cmd({'requester': 'client-1', 'json_workflow': workflow})
+    ops.execute_chain_exec_cmd({'requester': 'client-1', 'json_workflow': workflow, 'workflow_id': 'workflow-test-1'})
 
     response = last_response(worker_stub)
     assert response['status'] == 'ok'

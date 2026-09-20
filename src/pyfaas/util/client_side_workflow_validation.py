@@ -27,12 +27,6 @@ from pyfaas.exceptions import PyFaaSWorkflowValidationError
 def validate_json_workflow_structure(workflow: dict[str, dict[str, object]]) -> None:
     if workflow == {}:
         raise PyFaaSWorkflowValidationError('Empty workflow')
-    
-    workflow_id = workflow.get('id')
-    if not workflow_id:
-        raise PyFaaSWorkflowValidationError('Missing or empty field "id". Workflows must have a string ID')
-    if not isinstance(workflow_id, str):
-        raise PyFaaSWorkflowValidationError(f'Field "id" must be of type string. Provided type: {type(workflow_id)}')        
 
     # 'entry_function' field check
     entry_function = workflow.get('entry_function')   # Starting point of the workflow must be provided via 'entry_function' field

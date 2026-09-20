@@ -356,15 +356,15 @@ class WorkerOperations:
         requester_client = json_payload['requester']
         
         workflow = json_payload['json_workflow']
+        workflow_id = json_payload['workflow_id']
 
-        workflow_id = workflow.get('id')
         workflow_function_set = workflow.get('functions')
         
         # Check if all the listed functions are registered
         function_names = [func_name for func_name, _ in workflow_function_set.items()]
         all_funcs_registered, missing_func_name = self._check_function_set_registration(function_names)
         if not all_funcs_registered:
-            self.worker._logger.error(f"No function named '{missing_func_name}' specified in the workflow is registered right now")
+            self.worker._logger.error(f"No function named '{missing_func_name}' specified in workflow '{workflow_id}' is registered right now")
             client_json_response = self._build_JSON_response(
                 message_id=str(uuid.uuid4()),
                 dest_client=requester_client, 
@@ -374,13 +374,14 @@ class WorkerOperations:
                 action=None, 
                 result_type=None, 
                 result=None, 
-                message=f"No function named '{missing_func_name}' specified in the workflow is registered at the worker right now"
+                message=f"No function named '{missing_func_name}' specified in workflow '{workflow_id}' is registered at the worker right now"
             )
             response = [b'', json.dumps(client_json_response).encode()]
             self.worker._outgoing_tx_queue.put(response)
             return
 
         self.worker._logger.info('All functions are registered')
+        self.worker._logger.info(f"Executing workflow '{workflow_id}'")
 
         # Worker-side function validation
         try:

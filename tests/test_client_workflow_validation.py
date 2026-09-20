@@ -35,8 +35,6 @@ def test_empty_workflow_raises():
 
 
 @pytest.mark.parametrize('mutate, match', [
-    (lambda wf: wf.pop('id'), 'id'),
-    (lambda wf: wf.update(id=123), 'must be of type string'),
     (lambda wf: wf.pop('entry_function'), 'entry_function'),
     (lambda wf: wf.update(entry_function=123), 'must be of type string'),
     (lambda wf: wf.pop('functions'), 'functions'),

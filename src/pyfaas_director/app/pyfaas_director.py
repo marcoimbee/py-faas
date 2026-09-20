@@ -302,8 +302,10 @@ class PyfaasDirector:
                 case 'chain_exec':
                     request_id = uuid.uuid4()
 
+                    workflow_id = f'workflow-{uuid.uuid4()}'                # Assigning an ID to the workflow
+                    self._logger.debug(f"Assigned ID '{workflow_id}' to received workflow")
+
                     json_workflow = json_payload['json_workflow']
-                    # workflow_id = json_workflow.get('id')
                     workflow_function_set = json_workflow.get('functions')
 
                     # Checking if:
@@ -342,6 +344,7 @@ class PyfaasDirector:
                         selected_worker_id = self._select_worker()      # Any Worker can be contacted to execute the whole workflow
 
                         json_payload['request_id'] = str(request_id)
+                        json_payload['workflow_id'] = str(workflow_id)
 
                         # Expecting #responses = 1
                         self._pending_multiple_responses[request_id] = {
