@@ -10,32 +10,11 @@ A Director is in charge of routing the requests from clients to Workers and vice
 
 ## Disclaimer
 
-In a FaaS framework, security is of course one of the main concerns to be addressed.
+This is a personal, experimental project with **no sandboxing, authentication or encryption** (although those parts are going to be eventually impelmented). By design, Workers execute functions sent by clients as arbitrary Python code, with the full permissions of the user running the Worker. Anyone who can reach a Director or Worker can run code on your machine.
 
-A proper FaaS library that allows clients to remotely requests functions execution would, more or less, follow the following workflow:
-
-1) Client requests function execution to server/Worker
-2) Server/Worker validates such a request
-3) Spawns a container (or reuses one of a controlled pool)
-4) Executes function in the containerized environment
-5) Returns to the client the function result/potential errors
-
-The most straightforward way to implement such a workflow would be to leverage Docker and Python's Docker container management SDK.
-
-### Current status
-
-This project is being developed on a Windows 10 laptop.
-Running Docker while developing this project significantly impacts system performance, as (just to make an example) Chrome pages take 30-60s to load while the Docker engine is running, and Docker API interactions are very slow in this setup.
-
-**Security features will for sure be implemented in the future:** right now, no suitable developing resources are available.
-
-### Warning
-
-Until then, using this library comes with security risks. Please do not expose it to untrusted clients or networks. I do not, and will not take any responsibility for damages or issues arising from its use.
-
-### TL;DR
-
-This is a personal and experimental project and currently lacks proper sandboxing and security isolation. Do **not** expose it to untrusted clients or networks. Use at your own risk. I do not, and will not take any responsibility for damages or issues arising from its use.
+- Do **not** expose it to untrusted clients or networks, **including shared LANs and Wi-Fi**.
+- Run it only on machines you control, ideally in a VM or container you can discard.
+- Use at your own risk. The software is provided "as is", without warranty of any kind; see the [LICENSE](LICENSE).
 
 ## Installation guide
 
@@ -52,7 +31,7 @@ TODO
 ```bash
 pip install pyfaas
 ```
-To be able to use the library, import PyFaaS in you python file:
+To be able to use the library, import PyFaaS in your python file:
 ```py
 from pyfaas import <list-of-functions>
 ``` -->
@@ -90,11 +69,11 @@ greeting_msg = "Hello brother"
 - `[network]` section: contains all the necessary networking fields to be able to contact the Director
   - `director_ip_addr`: the IP address of the Director.
   - `director_port`: the port of the Director.
-    - Given this example file, the Dorker will be recahable at `192.168.1.12:40000` by clients and Workers.
+    - Given this example file, the Worker will be recahable at `192.168.1.12:40000` by clients and Workers.
 - `[logging]`: logging configuration options.
-  - `[log_level]`: the logging level of the Dorker on stdout. Logging can be disabled by specifying `""` for this field
-  - `[log_directory]`: destination directory of the Dorker log file. If non-existent, it is created upon Worker start.
-  - `[log_filename]`: filename of the Dorker log file. Log lines are dumped in append mode.
+  - `[log_level]`: the logging level of the Worker on stdout. Logging can be disabled by specifying `""` for this field
+  - `[log_directory]`: destination directory of the Worker log file. If non-existent, it is created upon Worker start.
+  - `[log_filename]`: filename of the Worker log file. Log lines are dumped in append mode.
 - `[workers]`: options for how the Director must behave with respect to the registered Workers.
   - `heartbeat_check_interval_ms`: how often the Director will check if the registered Workers have refreshed their subscription with a heartbeat message (in milliseconds).
   - `expected_heartbeat_interval_ms`: how often the Director is expecting to receive heartbeat messages from Workers (in milliseconds).
@@ -139,7 +118,7 @@ greeting_msg = "Hello brother"
 - `[network]` section: contains all the necessary networking fields for the Worker to be able to contact the Director
   - `director_ip_addr`: the IP address of the director to which the Worker will be registered.
   - `director_port`: the port of the director to which the Worker will be registered, given the IP address.
-  - Given this example file, the Worker will be register and use as a message broker the the PyFaaS Director at `192.168.1.12:40000`.
+  - Given this example file, the Worker will register and use as a message brokers the PyFaaS Director at `192.168.1.12:40000`.
 - `[statistics]` section: contains configuration options for the metrics gathering capabilities of the Worker
   - `enabled`: if `true`, allows the Worker to collect metrics related to functions' execution. If `false`, statistics gathering is disabled.
 - `[logging]`: logging configuration options.
@@ -155,7 +134,7 @@ greeting_msg = "Hello brother"
 - `[misc]`: miscellaneous configuration options
   - `greeting_msg`: a greeting message that will be printed to stdout when the Worker starts (merely for testing purposes).
 
-## Client TOML configuration file
+### Client TOML configuration file
 
 The client using the library can setup the communication with a remote Director using a TOML configuration file as well. The fields are the following:
 
@@ -199,4 +178,4 @@ To run all the tests in a Linux terminal:
 
 ## Notes
 
-- The chained execution of functions and their structuring using user-defined workflows are topics that have have been inspired by [this project](https://github.com/edgeless-project/edgeless).
+- The chained execution of functions and their structuring using user-defined workflows are topics that have been inspired by [this project](https://github.com/edgeless-project/edgeless).
