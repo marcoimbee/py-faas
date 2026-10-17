@@ -240,7 +240,8 @@ class PyfaasDirector:
                     if self._functions_workers_map[func_id]['available_on'] != 'ANY':
                         selected_worker_ids = self._functions_workers_map[func_id]['available_on']   # Get Worker ID, but not all of them
                     else:
-                        selected_worker_ids = list(self._workers.keys())  # Get ALL Worker IDs, since the function is available everywhere
+                        with self._lock:
+                            selected_worker_ids = list(self._workers.keys())  # Get ALL Worker IDs, since the function is available everywhere
                     
                     if not selected_worker_ids:         # No Worker is available
                         raise DirectorNoAvailableWorkersError
@@ -264,7 +265,8 @@ class PyfaasDirector:
                     return      # End here, message(s) has already been forwarded
                 
                 case 'get_worker_ids':
-                    active_worker_ids = self._workers.keys()
+                    with self._lock:
+                        active_worker_ids = self._workers.keys()
                     self._logger.debug(f'Currently active workers: {active_worker_ids}')
                     get_worker_ids_response = {
                         'status': 'ok',
@@ -401,7 +403,9 @@ class PyfaasDirector:
 
                 case 'list':
                     request_id = uuid.uuid4()
-                    if self._workers_are_synchronized or len(self._workers) == 1:       # All Workers are synchronized OR single Worker
+                    with self._lock:
+                        active_workers = len(self._workers)
+                    if self._workers_are_synchronized or active_workers == 1:       # All Workers are synchronized OR single Worker
                         selected_worker_id = self._select_worker()    # Any Worker can be contacted to get the func list
 
                         # Needed by the Director once the worker(s) will respond to such a request
@@ -416,7 +420,8 @@ class PyfaasDirector:
 
                         self._forward_client_req_single_worker(client_id, selected_worker_id, json_payload)
                     else:   # Unsynchronized Workers
-                        selected_worker_ids = self._workers.keys()    # ALL Workers have to be contacted and their result is later aggregated
+                        with self._lock:
+                            selected_worker_ids = self._workers.keys()    # ALL Workers have to be contacted and their result is later aggregated
 
                         # Expecting #responses = #contacted workers
                         self._pending_multiple_responses[request_id] = {
@@ -533,12 +538,14 @@ class PyfaasDirector:
         # Multiple Workers and possibly synchronized, choose worker
         match self._worker_selection_strategy:
             case 'Round-Robin':
-                worker_ids = list(self._workers.keys())
+                with self._lock:
+                    worker_ids = list(self._workers.keys())
                 worker_id = worker_ids[self._round_robin_index % len(worker_ids)]
                 self._round_robin_index += 1
                 return worker_id
             case 'Random':
-                worker_id, _ = random.choice(list(self._workers.items()))
+                with self._lock:
+                    worker_id, _ = random.choice(list(self._workers.items()))
                 return worker_id
             case 'Proximity-based':
                 return self._closest_worker
@@ -874,26 +881,18 @@ class PyfaasDirector:
                         to_be_unregistered.append(worker_id)
 
             for worker_id in to_be_unregistered:
-                try:
-                    # TODO: handle this on worker??? What if it disconnected???
-                    unregister_msg = [worker_id.encode(), b'', json.dumps({'Action': 'Unregister'}).encode()]       # This is wrong
-                    self._zmq_socket.send_multipart(unregister_msg)
-                    self._logger.info(f"Notified worker unregistration to '{worker_id}'")
-                except Exception as e:
-                    self._logger.warning(f"Failed to notify worker '{worker_id}': {e}")
-                finally:
-                    with self._lock:
-                        if worker_id in self._workers:
-                            # DELETING WORKER
-                            self._logger.info(f"Worker '{worker_id}' unregistered")
-                            del self._workers[worker_id]
-                            # Deleting worker from the lists that tell where a certain function can be executed at
-                            for _, functions_map in self._functions_workers_map.items():
-                                available_on = functions_map['available_on']
-                                if available_on == 'ANY':
-                                    continue
-                                if worker_id in available_on:
-                                    available_on.remove(worker_id)
+                with self._lock:
+                    if worker_id in self._workers:
+                        # DELETING WORKER
+                        self._logger.info(f"Worker '{worker_id}' unregistered")
+                        del self._workers[worker_id]
+                        # Deleting worker from the lists that tell where a certain function can be executed at
+                        for _, functions_map in self._functions_workers_map.items():
+                            available_on = functions_map['available_on']
+                            if available_on == 'ANY':
+                                continue
+                            if worker_id in available_on:
+                                available_on.remove(worker_id)
 
     def _cleanup(self) -> None:
         try:
